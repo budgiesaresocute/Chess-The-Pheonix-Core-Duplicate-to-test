@@ -43,9 +43,51 @@ export default function PhoenixCore({ timerMode, onBack }) {
   const gameRef = useRef(game);
   gameRef.current = game;
 
-  // ✅ FIX: Keep a ref that always has the LATEST phoenixState
-  // This solves the stale closure bug where handlePotentialRevival
-  // was reading old phoenixState when called from applyMove
+  const handlePotentialRevival = useCallback((g, checkmatedColor, ps) => {
+  const phoenixPos = ps.positions[checkmatedColor];
+  const phoenixActive = ps.active[checkmatedColor];
+  const revivalUsed = ps.used[checkmatedColor];
+
+  if (!phoenixActive || !phoenixPos || revivalUsed) return false;
+
+  // Check if phoenix square is under attack
+  try {
+    const fenParts = g.fen().split(' ');
+    fenParts[1] = checkmatedColor === 'w' ? 'b' : 'w';
+    const attackerGame = new Chess(fenParts.join(' '));
+    const attackerMoves = attackerGame.moves({ verbose: true });
+    if (attackerMoves.some(m => m.to === phoenixPos)) return false;
+  } catch { return false; }
+
+  // Teleport king
+  const kingSquare = findKingSquare(g, checkmatedColor);
+  if (!kingSquare) return false;
+
+  const newFen = moveKingInFen(g.fen(), kingSquare, phoenixPos, checkmatedColor);
+  if (!newFen) return false;
+
+  let revivedGame;
+  try { revivedGame = new Chess(newFen); } catch { return false; }
+
+  setPhoenixState(prev => ({
+    ...prev,
+    used: { ...prev.used, [checkmatedColor]: true },
+    active: { ...prev.active, [checkmatedColor]: false },
+    positions: { ...prev.positions, [checkmatedColor]: null },
+  }));
+
+  setGame(revivedGame);
+  setLastMove(null);
+  setCheckSquare(null);
+  updateCheckSquare(revivedGame);
+  playPhoenixReviveSound();
+
+  const colorName = checkmatedColor === 'w' ? 'White' : 'Black';
+  setRevivalNotif(`${colorName} Phoenix Core activated! King teleported to ${phoenixPos.toUpperCase()}!`);
+  setTimeout(() => setRevivalNotif(null), 4000);
+
+  return true;
+}, [updateCheckSquare]);
   const phoenixStateRef = useRef(phoenixState);
   useEffect(() => {
     phoenixStateRef.current = phoenixState;
@@ -184,7 +226,7 @@ export default function PhoenixCore({ timerMode, onBack }) {
 
   // ✅ FIX: handlePotentialRevival now receives ps as a parameter
   // instead of reading from the closure — always uses fresh state
-  const handlePotentialRevival = useCallback((g, newGame, checkmatedColor, ps) => {
+  const handlePotentialRevival = useCallback( newGame, checkmatedColor, ps) => {
     const phoenixPos = ps.positions[checkmatedColor];
     const phoenixActive = ps.active[checkmatedColor];
     const revivalUsed = ps.used[checkmatedColor];
