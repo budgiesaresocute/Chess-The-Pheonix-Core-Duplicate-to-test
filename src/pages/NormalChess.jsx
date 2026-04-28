@@ -8,12 +8,12 @@ import GameOverModal from '../components/chess/GameOverModal';
 import { playMoveSound, playCaptureSound, playCheckSound, playCheckmateSound, playGameStartSound } from '../lib/chessSounds';
 
 const BOTS = [
-  { id: 'astra',   name: 'Astra',        emoji: '🌱', depth: 2,  label: 'Beginner',     personality: 'Still learning…' },
-  { id: 'orion',   name: 'Orion',        emoji: '⭐', depth: 4,  label: 'Easy',         personality: "Let's play!" },
-  { id: 'titanx',  name: 'TitanX',       emoji: '⚔️', depth: 6,  label: 'Intermediate', personality: 'Stay sharp.' },
-  { id: 'vortex',  name: 'Vortex',       emoji: '🌪️', depth: 8,  label: 'Advanced',     personality: 'I see everything.' },
-  { id: 'zenith',  name: 'Zenith',       emoji: '👑', depth: 10, label: 'Master',       personality: 'You must be precise.' },
-  { id: 'phoenix', name: 'Phoenix Prime',emoji: '🔥', depth: 18, label: 'Maximum',      personality: 'This is your end.' },
+  { id: 'astra',   name: 'Astra',         emoji: '🌱', depth: 2,  label: 'Beginner',     personality: 'Still learning…' },
+  { id: 'orion',   name: 'Orion',         emoji: '⭐', depth: 4,  label: 'Easy',         personality: "Let's play!" },
+  { id: 'titanx',  name: 'TitanX',        emoji: '⚔️', depth: 6,  label: 'Intermediate', personality: 'Stay sharp.' },
+  { id: 'vortex',  name: 'Vortex',        emoji: '🌪️', depth: 8,  label: 'Advanced',     personality: 'I see everything.' },
+  { id: 'zenith',  name: 'Zenith',        emoji: '👑', depth: 10, label: 'Master',       personality: 'You must be precise.' },
+  { id: 'phoenix', name: 'Phoenix Prime', emoji: '🔥', depth: 18, label: 'Maximum',      personality: 'This is your end.' },
 ];
 
 export default function NormalChess({ timerMode, onBack }) {
@@ -34,58 +34,9 @@ export default function NormalChess({ timerMode, onBack }) {
   const gameRef = useRef(game);
   gameRef.current = game;
 
-  // Init Stockfish
-// Simple bot AI fallback
-const getSimpleBotMove = useCallback((g, depth) => {
-  const moves = g.moves({ verbose: true });
-  if (!moves.length) return null;
-
-  // Try captures first
-  const captures = moves.filter(m => m.captured);
-  if (captures.length && depth < 6) {
-    return captures[Math.floor(Math.random() * captures.length)];
-  }
-
-  // Score moves simply
-  const pieceValues = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
-  let bestMove = moves[0];
-  let bestScore = -Infinity;
-
-  for (const move of moves) {
-    let score = 0;
-    if (move.captured) score += pieceValues[move.captured] * 10;
-    if (move.piece === 'p' && (move.to[1] === '7' || move.to[1] === '2')) score += 5;
-    if (['d4','d5','e4','e5','c4','c5'].includes(move.to)) score += 2;
-    score += (Math.random() * depth);
-    if (score > bestScore) { bestScore = score; bestMove = move; }
-  }
-  return bestMove;
-}, []);
-
-useEffect(() => {
-  if (!selectedBot) return;
-  playGameStartSound();
-}, [selectedBot]);
-      sf.postMessage('uci');
-      sf.postMessage('ucinewgame');
-      sf.onmessage = (e) => {
-        const msg = e.data;
-        if (typeof msg === 'string' && msg.startsWith('bestmove')) {
-          const parts = msg.split(' ');
-          const bestMove = parts[1];
-          if (bestMove && bestMove !== '(none)') {
-            const from = bestMove.slice(0, 2);
-            const to = bestMove.slice(2, 4);
-            const promotion = bestMove[4] || undefined;
-            applyBotMove(from, to, promotion);
-          }
-          setIsThinking(false);
-        }
-      };
-      stockfishRef.current = sf;
-      playGameStartSound();
-    } catch {}
-    return () => { stockfishRef.current?.terminate(); };
+  useEffect(() => {
+    if (!selectedBot) return;
+    playGameStartSound();
   }, [selectedBot]);
 
   // Timer
@@ -134,12 +85,11 @@ useEffect(() => {
         if (newGame.inCheck() && !newGame.isCheckmate()) playCheckSound();
         setLastMove({ from: result.from, to: result.to });
         setHistory(newGame.history({ verbose: true }));
-                updateCheckSquare(newGame);
+        updateCheckSquare(newGame);
         if (newGame.isCheckmate()) {
           playCheckmateSound();
           setTimerRunning(false);
-          const winner = newGame.turn() === 'w' ? 'Black wins' : 'White wins';
-          setGameOver({ result: winner, reason: 'Checkmate' });
+          setGameOver({ result: newGame.turn() === 'w' ? 'Black wins' : 'White wins', reason: 'Checkmate' });
         } else if (newGame.isDraw()) {
           setTimerRunning(false);
           setGameOver({ result: 'Draw', reason: 'Stalemate or draw rule' });
@@ -149,23 +99,36 @@ useEffect(() => {
     });
   }, [updateCheckSquare]);
 
-  const triggerStockfish = useCallback((fen, depth) => {
-  setIsThinking(true);
-  setTimeout(() => {
-    const tempGame = new Chess(fen);
-    const move = getSimpleBotMove(tempGame, depth);
-    if (move) {
-      applyBotMove(move.from, move.to, move.promotion);
-    }
-    setIsThinking(false);
-  }, 500 + Math.random() * 1000);
-}, [getSimpleBotMove, applyBotMove]);
+  const triggerBot = useCallback((fen, depth) => {
+    setIsThinking(true);
+    setTimeout(() => {
+      try {
+        const tempGame = new Chess(fen);
+        const moves = tempGame.moves({ verbose: true });
+        if (!moves.length) { setIsThinking(false); return; }
+        const pieceValues = { p:1, n:3, b:3, r:5, q:9, k:0 };
+        let bestMove = moves[0];
+        let bestScore = -Infinity;
+        for (const move of moves) {
+          let score = 0;
+          if (move.captured) score += pieceValues[move.captured] * 10;
+          if (['d4','d5','e4','e5'].includes(move.to)) score += 3;
+          if (move.piece === 'p' && (move.to[1] === '7' || move.to[1] === '2')) score += 5;
+          score += Math.random() * depth * 2;
+          if (score > bestScore) { bestScore = score; bestMove = move; }
+        }
+        applyBotMove(bestMove.from, bestMove.to, bestMove.promotion);
+      } catch {}
+      setIsThinking(false);
+    }, 400 + Math.random() * 800);
+  }, [applyBotMove]);
+
   const handleSquareClick = useCallback((square) => {
     if (gameOver || isThinking) return;
     if (!timerRunning && history.length === 0) setTimerRunning(true);
 
     const turn = game.turn();
-    if (turn !== 'w') return; // Player is white
+    if (turn !== 'w') return;
 
     if (selectedSquare) {
       if (legalMoves.includes(square)) {
@@ -186,7 +149,6 @@ useEffect(() => {
           updateCheckSquare(newGame);
           setSelectedSquare(null);
           setLegalMoves([]);
-
           if (newGame.isCheckmate()) {
             playCheckmateSound();
             setTimerRunning(false);
@@ -195,7 +157,7 @@ useEffect(() => {
             setTimerRunning(false);
             setGameOver({ result: 'Draw', reason: 'Stalemate or draw rule' });
           } else {
-            setTimeout(() => triggerStockfish(newGame.fen(), selectedBot.depth), 300);
+            setTimeout(() => triggerBot(newGame.fen(), selectedBot.depth), 300);
           }
         } catch {}
       } else {
@@ -215,7 +177,7 @@ useEffect(() => {
         setLegalMoves(game.moves({ square, verbose: true }).map(m => m.to));
       }
     }
-  }, [game, selectedSquare, legalMoves, gameOver, isThinking, timerRunning, history, selectedBot, triggerStockfish, updateCheckSquare]);
+  }, [game, selectedSquare, legalMoves, gameOver, isThinking, timerRunning, history, selectedBot, triggerBot, updateCheckSquare]);
 
   const handleRestart = () => {
     const newGame = new Chess();
@@ -230,7 +192,6 @@ useEffect(() => {
     setBlackTime(timerMode?.seconds || 600);
     setTimerRunning(false);
     setIsThinking(false);
-    stockfishRef.current?.postMessage('ucinewgame');
     playGameStartSound();
   };
 
@@ -247,7 +208,6 @@ useEffect(() => {
     setIsThinking(false);
   };
 
-  // Bot selection screen
   if (!selectedBot) {
     return (
       <div className="min-h-screen bg-background flex flex-col font-inter">
@@ -258,11 +218,8 @@ useEffect(() => {
         </div>
         <div className="flex-1 flex flex-col gap-3 p-4 overflow-y-auto">
           {BOTS.map(bot => (
-            <button
-              key={bot.id}
-              onClick={() => setSelectedBot(bot)}
-              className="flex items-center gap-4 px-5 py-4 rounded-2xl border border-border bg-card hover:bg-secondary/50 hover:border-primary/50 transition-all duration-200 text-left active:scale-[0.98]"
-            >
+            <button key={bot.id} onClick={() => setSelectedBot(bot)}
+              className="flex items-center gap-4 px-5 py-4 rounded-2xl border border-border bg-card hover:bg-secondary/50 hover:border-primary/50 transition-all duration-200 text-left active:scale-[0.98]">
               <span className="text-3xl">{bot.emoji}</span>
               <div className="flex flex-col flex-1">
                 <div className="flex items-center gap-2">
@@ -287,21 +244,18 @@ useEffect(() => {
         botName={selectedBot.name}
         gameStatus={game.inCheck() && !game.isGameOver() ? '⚠ Check!' : null}
       />
-
       <div className="flex-1 flex flex-col lg:flex-row items-center lg:items-start justify-center gap-4 p-4">
         <div className="flex flex-col items-center gap-3">
-          {/* Bot info */}
           <div className="flex items-center justify-between w-full px-1">
             <div className="flex items-center gap-2">
               <span className="text-lg">{selectedBot.emoji}</span>
-                            <div>
+              <div>
                 <span className="text-sm font-bold text-foreground">{selectedBot.name}</span>
                 {isThinking && <span className="text-xs text-primary ml-2 animate-pulse">thinking…</span>}
               </div>
             </div>
             <span className="text-xs italic text-muted-foreground">&ldquo;{selectedBot.personality}&rdquo;</span>
           </div>
-
           <ChessBoard
             game={game}
             selectedSquare={selectedSquare}
@@ -310,13 +264,11 @@ useEffect(() => {
             onSquareClick={handleSquareClick}
             checkSquare={checkSquare}
           />
-
           <div className="flex items-center gap-2 w-full px-1">
             <div className="w-3 h-3 rounded-full bg-white" />
             <span className="text-sm font-bold text-foreground">You (White)</span>
           </div>
         </div>
-
         <div className="flex flex-col gap-3 w-full max-w-xs lg:max-w-[240px]">
           <GameTimer
             whiteTime={whiteTime}
@@ -324,7 +276,6 @@ useEffect(() => {
             activeColor={game.turn()}
             isRunning={timerRunning}
           />
-
           <div className="flex gap-2">
             <button onClick={handleUndo} disabled={history.length < 2}
               className="flex-1 py-2 text-xs rounded-lg bg-secondary text-foreground hover:bg-secondary/80 disabled:opacity-40 transition-colors font-medium">
@@ -335,13 +286,11 @@ useEffect(() => {
               ↺ Restart
             </button>
           </div>
-
           <div className="flex-1 min-h-0" style={{ height: '300px' }}>
             <MoveHistory history={history} />
           </div>
         </div>
       </div>
-
       <GameOverModal
         result={gameOver?.result}
         reason={gameOver?.reason}
@@ -350,4 +299,4 @@ useEffect(() => {
       />
     </div>
   );
-          }
+                           }
