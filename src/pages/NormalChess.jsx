@@ -16,6 +16,7 @@ import {
 } from '../lib/chessSounds';
 
 import { createStockfish } from '../engine/stockfishBot';
+import { updateElo } from '../lib/eloSystem';
 
 /* ---------------- BOTS ---------------- */
 const BOTS = [
@@ -29,15 +30,17 @@ const BOTS = [
 
 export default function NormalChess({ timerMode, onBack }) {
   const [selectedBot, setSelectedBot] = useState(null);
-  const [game, setGame] = useState(new Chess());
 
+  const [game, setGame] = useState(new Chess());
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [legalMoves, setLegalMoves] = useState([]);
   const [lastMove, setLastMove] = useState(null);
   const [checkSquare, setCheckSquare] = useState(null);
 
   const [gameOver, setGameOver] = useState(null);
+
   const [history, setHistory] = useState([]);
+  const [pgn, setPgn] = useState([]);
 
   const [whiteTime, setWhiteTime] = useState(timerMode?.seconds || 600);
   const [blackTime, setBlackTime] = useState(timerMode?.seconds || 600);
@@ -46,13 +49,16 @@ export default function NormalChess({ timerMode, onBack }) {
   const [isThinking, setIsThinking] = useState(false);
   const [promotionMove, setPromotionMove] = useState(null);
 
+  const [playerRating, setPlayerRating] = useState(400);
+  const [botRating, setBotRating] = useState(800);
+
   const engineRef = useRef(null);
   const gameRef = useRef(game);
   const timerRef = useRef(null);
 
   gameRef.current = game;
 
-  /* ---------------- INIT ENGINE ---------------- */
+  /* ---------------- ENGINE ---------------- */
   useEffect(() => {
     engineRef.current = createStockfish();
   }, []);
@@ -111,19 +117,38 @@ export default function NormalChess({ timerMode, onBack }) {
 
       setLastMove({ from: move.from, to: move.to });
       setHistory(g.history({ verbose: true }));
+      setPgn(g.history());
       updateCheckSquare(g);
 
       if (g.isCheckmate()) {
         playCheckmateSound();
-        setGameOver({ result: g.turn() === 'w' ? 'Black wins' : 'White wins', reason: 'Checkmate' });
+
+        const playerWon = g.turn() === 'b';
+
+        const result = playerWon ? 1 : 0;
+
+        const updated = updateElo(
+          { rating: playerRating },
+          { rating: botRating },
+          result
+        );
+
+        setPlayerRating(updated.rating);
+
+        setGameOver({
+          result: playerWon ? 'White wins' : 'Black wins',
+          reason: 'Checkmate',
+          ratingChange: updated.rating - playerRating
+        });
+
         setTimerRunning(false);
       }
 
       return g;
     });
-  }, [updateCheckSquare]);
+  }, [updateCheckSquare, playerRating, botRating]);
 
-  /* ---------------- BOT (PHOENIX PRIME LOGIC) ---------------- */
+  /* ---------------- BOT ---------------- */
   const triggerBot = useCallback(async (fen, depth) => {
     if (!engineRef.current) return;
 
@@ -153,7 +178,11 @@ export default function NormalChess({ timerMode, onBack }) {
 
       const c = candidates[i] || candidates[0];
 
-      applyMove(c.substring(0, 2), c.substring(2, 4), c[4]);
+      applyMove(
+        c.substring(0, 2),
+        c.substring(2, 4),
+        c[4]
+      );
 
     } catch (e) {
       console.error(e);
@@ -162,13 +191,12 @@ export default function NormalChess({ timerMode, onBack }) {
     setIsThinking(false);
   }, [applyMove]);
 
-  /* ---------------- CLICK HANDLER ---------------- */
+  /* ---------------- CLICK ---------------- */
   const handleSquareClick = useCallback((square) => {
     if (gameOver || isThinking) return;
 
     const g = game;
-    const turn = g.turn();
-    if (turn !== 'w') return;
+    if (g.turn() !== 'w') return;
 
     if (selectedSquare) {
       if (!legalMoves.includes(square)) {
@@ -178,6 +206,7 @@ export default function NormalChess({ timerMode, onBack }) {
       }
 
       const temp = new Chess(g.fen());
+
       const move = temp.move({
         from: selectedSquare,
         to: square,
@@ -186,7 +215,7 @@ export default function NormalChess({ timerMode, onBack }) {
 
       if (!move) return;
 
-      // 🚨 PROMOTION FIX
+      // PROMOTION CHECK
       if (move.flags?.includes('p')) {
         setPromotionMove({
           from: selectedSquare,
@@ -205,7 +234,7 @@ export default function NormalChess({ timerMode, onBack }) {
     } else {
       const piece = g.get(square);
 
-      if (piece?.color === turn) {
+      if (piece?.color === 'w') {
         setSelectedSquare(square);
         setLegalMoves(g.moves({ square, verbose: true }).map(m => m.to));
       }
@@ -252,17 +281,26 @@ export default function NormalChess({ timerMode, onBack }) {
         isRunning={timerRunning}
       />
 
+      <div className="p-2 text-sm">
+        PGN: {pgn.join(' ')}
+      </div>
+
       <MoveHistory history={history} />
+
+      <div className="p-2 text-xs">
+        Rating: {playerRating}
+      </div>
 
       {/* PROMOTION UI */}
       {promotionMove && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center">
           <div className="bg-white p-4 flex gap-2 rounded-xl">
-            {['q', 'r', 'b', 'n'].map(p => (
+            {['q','r','b','n'].map(p => (
               <button
                 key={p}
                 onClick={() => {
                   const g = new Chess(promotionMove.fen);
+
                   g.move({
                     from: promotionMove.from,
                     to: promotionMove.to,
@@ -271,7 +309,9 @@ export default function NormalChess({ timerMode, onBack }) {
 
                   setGame(g);
                   setPromotionMove(null);
+
                   setHistory(g.history({ verbose: true }));
+                  setPgn(g.history());
 
                   setTimeout(() => triggerBot(g.fen(), selectedBot.depth), 300);
                 }}
@@ -291,4 +331,4 @@ export default function NormalChess({ timerMode, onBack }) {
       />
     </div>
   );
-}
+            }
