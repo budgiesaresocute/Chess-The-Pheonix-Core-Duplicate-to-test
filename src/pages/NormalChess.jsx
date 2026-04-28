@@ -18,6 +18,7 @@ import {
 import { createStockfish } from '../engine/stockfishBot';
 import { updateGlicko } from '../lib/glicko2';
 
+/* ---------------- BOTS ---------------- */
 const BOTS = [
   { id: 'astra', name: 'Astra', emoji: '🌱', depth: 2 },
   { id: 'orion', name: 'Orion', emoji: '⭐', depth: 4 },
@@ -29,6 +30,7 @@ const BOTS = [
 
 export default function NormalChess({ timerMode, onBack }) {
 
+  /* ---------------- STATE ---------------- */
   const [selectedBot, setSelectedBot] = useState(null);
 
   const [game, setGame] = useState(new Chess());
@@ -37,10 +39,8 @@ export default function NormalChess({ timerMode, onBack }) {
   const [lastMove, setLastMove] = useState(null);
   const [checkSquare, setCheckSquare] = useState(null);
 
-  const [gameOver, setGameOver] = useState(null);
-
   const [history, setHistory] = useState([]);
-  const [pgn, setPgn] = useState('');
+  const [pgn, setPgn] = useState([]);
 
   const [whiteTime, setWhiteTime] = useState(timerMode?.seconds || 600);
   const [blackTime, setBlackTime] = useState(timerMode?.seconds || 600);
@@ -49,16 +49,23 @@ export default function NormalChess({ timerMode, onBack }) {
   const [isThinking, setIsThinking] = useState(false);
   const [promotionMove, setPromotionMove] = useState(null);
 
-  const [evalScore, setEvalScore] = useState(0);
+  const [gameOver, setGameOver] = useState(null);
 
   const [player, setPlayer] = useState({
     rating: 400,
     rd: 350
   });
 
+  const [botRating] = useState(800);
+
+  /* ---------------- ✏️ ANNOTATION SYSTEM ---------------- */
+  const [arrows, setArrows] = useState([]);
+  const [highlights, setHighlights] = useState([]);
+  const drawRef = useRef(null);
+
+  /* ---------------- REFS ---------------- */
   const engineRef = useRef(null);
   const gameRef = useRef(game);
-  const timerRef = useRef(null);
   const botLock = useRef(false);
 
   gameRef.current = game;
@@ -66,6 +73,7 @@ export default function NormalChess({ timerMode, onBack }) {
   /* ---------------- ENGINE ---------------- */
   useEffect(() => {
     engineRef.current = createStockfish();
+
     return () => {
       engineRef.current = null;
     };
@@ -75,33 +83,7 @@ export default function NormalChess({ timerMode, onBack }) {
     if (selectedBot) playGameStartSound();
   }, [selectedBot]);
 
-  /* ---------------- TIMER ---------------- */
-  useEffect(() => {
-    if (!timerRunning || gameOver) return;
-
-    timerRef.current = setInterval(() => {
-      const turn = gameRef.current.turn();
-
-      if (turn === 'w') {
-        setWhiteTime(t => Math.max(0, t - 1));
-      } else {
-        setBlackTime(t => Math.max(0, t - 1));
-      }
-    }, 1000);
-
-    return () => clearInterval(timerRef.current);
-  }, [timerRunning, gameOver]);
-
-  /* ---------------- STOCKFISH EVAL ---------------- */
-  const requestEval = useCallback((fen) => {
-    if (!engineRef.current) return;
-
-    engineRef.current.evaluate?.(fen, (score) => {
-      setEvalScore(score);
-    });
-  }, []);
-
-  /* ---------------- MOVE ---------------- */
+  /* ---------------- MOVE APPLY ---------------- */
   const applyMove = useCallback((from, to, promotion) => {
     setGame(prev => {
       const g = new Chess(prev.fen());
@@ -114,28 +96,29 @@ export default function NormalChess({ timerMode, onBack }) {
       else playMoveSound();
 
       if (g.inCheck()) playCheckSound();
+      else setCheckSquare(null);
 
       setLastMove({ from: move.from, to: move.to });
 
       const h = g.history({ verbose: true });
       setHistory(h);
-      setPgn(g.pgn());
-
-      requestEval(g.fen());
+      setPgn(h.map(m => m.san));
 
       if (g.isCheckmate()) {
         playCheckmateSound();
 
+        const playerWon = g.turn() === 'b';
+
         const updated = updateGlicko(
           player,
-          { rating: 800, rd: 350 },
-          g.turn() === 'b' ? 1 : 0
+          { rating: botRating, rd: 350 },
+          playerWon ? 1 : 0
         );
 
         setPlayer(updated);
 
         setGameOver({
-          result: g.turn() === 'b' ? 'White wins' : 'Black wins',
+          result: playerWon ? 'White wins' : 'Black wins',
           reason: 'Checkmate'
         });
 
@@ -144,7 +127,7 @@ export default function NormalChess({ timerMode, onBack }) {
 
       return g;
     });
-  }, [player, requestEval]);
+  }, [player, botRating]);
 
   /* ---------------- BOT ---------------- */
   const triggerBot = useCallback(async (fen, depth) => {
@@ -154,28 +137,15 @@ export default function NormalChess({ timerMode, onBack }) {
     setIsThinking(true);
 
     try {
-      const temp = new Chess(fen);
-      const legal = temp.moves({ verbose: true });
-
       const best = await engineRef.current.getBestMove(fen, depth, 3);
 
-      const candidates = [best];
-
-      while (candidates.length < 3) {
-        const r = legal[Math.floor(Math.random() * legal.length)];
-        candidates.push(r.from + r.to + (r.promotion || ''));
+      if (best) {
+        applyMove(
+          best.substring(0, 2),
+          best.substring(2, 4),
+          best[4]
+        );
       }
-
-      const weights = [0.7, 0.2, 0.1];
-      const rand = Math.random();
-
-      let i = 0;
-      if (rand > 0.7) i = 1;
-      if (rand > 0.9) i = 2;
-
-      const c = candidates[i];
-
-      applyMove(c.substring(0, 2), c.substring(2, 4), c[4]);
 
     } catch (e) {
       console.error(e);
@@ -192,21 +162,17 @@ export default function NormalChess({ timerMode, onBack }) {
     const g = game;
 
     if (selectedSquare) {
-      if (!legalMoves.includes(square)) {
+      const move = g.move({
+        from: selectedSquare,
+        to: square,
+        promotion: 'q'
+      });
+
+      if (!move) {
         setSelectedSquare(null);
         setLegalMoves([]);
         return;
       }
-
-      const temp = new Chess(g.fen());
-
-      const move = temp.move({
-        from: selectedSquare,
-        to: square,
-        promotion: undefined
-      });
-
-      if (!move) return;
 
       if (move.promotion) {
         setPromotionMove({
@@ -217,45 +183,68 @@ export default function NormalChess({ timerMode, onBack }) {
         return;
       }
 
-      setGame(temp);
+      setGame(new Chess(g.fen()));
       setSelectedSquare(null);
       setLegalMoves([]);
 
-      setTimeout(() => triggerBot(temp.fen(), selectedBot.depth), 400);
+      setTimeout(() => {
+        if (selectedBot) {
+          triggerBot(g.fen(), selectedBot.depth);
+        }
+      }, 300);
 
     } else {
       const piece = g.get(square);
 
       if (piece?.color === 'w') {
         setSelectedSquare(square);
-        setLegalMoves(g.moves({ square, verbose: true }).map(m => m.to));
+
+        setLegalMoves(
+          g.moves({ square, verbose: true }).map(m => m.to)
+        );
       }
     }
-  }, [game, selectedSquare, legalMoves, gameOver, isThinking, triggerBot, selectedBot]);
+  }, [game, selectedSquare, gameOver, isThinking, selectedBot, triggerBot]);
 
-  /* ---------------- PGN IMPORT ---------------- */
-  const importPGN = (text) => {
-    const g = new Chess();
-    g.loadPgn(text);
-    setGame(new Chess(g.fen()));
-    setPgn(text);
+  /* ---------------- ✏️ DRAW SYSTEM ---------------- */
+
+  const handleDrawStart = (square) => {
+    drawRef.current = square;
+  };
+
+  const handleDrawEnd = (square) => {
+    if (!drawRef.current) return;
+
+    const from = drawRef.current;
+
+    if (from === square) {
+      setHighlights(prev => [...prev, square]);
+    } else {
+      setArrows(prev => [
+        ...prev,
+        { from, to: square, color: 'rgba(0,150,255,0.6)' }
+      ]);
+    }
+
+    drawRef.current = null;
+  };
+
+  const clearDrawings = () => {
+    setArrows([]);
+    setHighlights([]);
   };
 
   /* ---------------- UI ---------------- */
   if (!selectedBot) {
     return (
       <div className="p-4">
-        <h2>Select Bot</h2>
+        <h2>Choose Bot</h2>
+
         {BOTS.map(b => (
           <button key={b.id} onClick={() => setSelectedBot(b)}>
             {b.emoji} {b.name}
           </button>
         ))}
-
-        <textarea
-          placeholder="Paste PGN to load game"
-          onBlur={(e) => importPGN(e.target.value)}
-        />
       </div>
     );
   }
@@ -263,17 +252,20 @@ export default function NormalChess({ timerMode, onBack }) {
   return (
     <div className="min-h-screen">
 
-      <GameHeader mode="bot" onBack={onBack} botName={selectedBot.name} />
+      <GameHeader mode="bot" botName={selectedBot.name} onBack={onBack} />
 
-      {/* ♟️ BOARD */}
       <ChessBoard
         game={game}
         selectedSquare={selectedSquare}
         legalMoves={legalMoves}
         lastMove={lastMove}
         onSquareClick={handleSquareClick}
-        checkSquare={checkSquare}
-        evalScore={evalScore}
+
+        arrows={arrows}
+        highlights={highlights}
+        onDrawStart={handleDrawStart}
+        onDrawEnd={handleDrawEnd}
+        clearDrawings={clearDrawings}
       />
 
       <GameTimer
@@ -283,19 +275,17 @@ export default function NormalChess({ timerMode, onBack }) {
         isRunning={timerRunning}
       />
 
-      {/* PGN EXPORT */}
-      <div className="p-2 text-sm">
-        <button onClick={() => navigator.clipboard.writeText(pgn)}>
-          Copy PGN
-        </button>
-      </div>
-
       <MoveHistory history={history} />
 
-      {/* PROMOTION */}
+      <div className="p-2 text-xs">
+        Rating: {player.rating}
+      </div>
+
+      {/* PROMOTION UI */}
       {promotionMove && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center">
           <div className="bg-white p-4 flex gap-2 rounded-xl">
+
             {['q','r','b','n'].map(p => (
               <button
                 key={p}
@@ -311,15 +301,21 @@ export default function NormalChess({ timerMode, onBack }) {
                   setGame(g);
                   setPromotionMove(null);
 
-                  setHistory(g.history({ verbose: true }));
-                  setPgn(g.pgn());
+                  const h = g.history({ verbose: true });
+                  setHistory(h);
+                  setPgn(h.map(m => m.san));
 
-                  setTimeout(() => triggerBot(g.fen(), selectedBot.depth), 300);
+                  if (selectedBot) {
+                    setTimeout(() =>
+                      triggerBot(g.fen(), selectedBot.depth), 300
+                    );
+                  }
                 }}
               >
                 {p.toUpperCase()}
               </button>
             ))}
+
           </div>
         </div>
       )}
@@ -330,6 +326,7 @@ export default function NormalChess({ timerMode, onBack }) {
         onRematch={() => setGame(new Chess())}
         onMenu={onBack}
       />
+
     </div>
   );
-}
+          }
