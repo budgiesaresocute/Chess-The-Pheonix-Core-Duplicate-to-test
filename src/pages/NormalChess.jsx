@@ -6,21 +6,22 @@ import GameTimer from '../components/chess/GameTimer';
 import GameHeader from '../components/chess/GameHeader';
 import GameOverModal from '../components/chess/GameOverModal';
 import { playMoveSound, playCaptureSound, playCheckSound, playCheckmateSound, playGameStartSound } from '../lib/chessSounds';
+import { createStockfish } from '../engine/stockfishBot';
 
 const BOTS = [
-  { id: 'astra',   name: 'Astra',         emoji: '🌱', depth: 2,  label: 'Beginner',     personality: 'Still learning…' },
-  { id: 'orion',   name: 'Orion',         emoji: '⭐', depth: 4,  label: 'Easy',         personality: "Let's play!" },
-  { id: 'titanx',  name: 'TitanX',        emoji: '⚔️', depth: 6,  label: 'Intermediate', personality: 'Stay sharp.' },
-  { id: 'vortex',  name: 'Vortex',        emoji: '🌪️', depth: 8,  label: 'Advanced',     personality: 'I see everything.' },
-  { id: 'zenith',  name: 'Zenith',        emoji: '👑', depth: 10, label: 'Master',       personality: 'You must be precise.' },
-  { id: 'phoenix', name: 'Phoenix Prime', emoji: '🔥', depth: 18, label: 'Maximum',      personality: 'This is your end.' },
+  { id: 'astra',   name: 'Astra',         emoji: '🌱', depth: 1,  label: 'Beginner',     personality: 'Still learning…',      useStockfish: false },
+  { id: 'orion',   name: 'Orion',         emoji: '⭐', depth: 3,  label: 'Easy',         personality: "Let's play!",           useStockfish: true  },
+  { id: 'titanx',  name: 'TitanX',        emoji: '⚔️', depth: 6,  label: 'Intermediate', personality: 'Stay sharp.',           useStockfish: true  },
+  { id: 'vortex',  name: 'Vortex',        emoji: '🌪️', depth: 10, label: 'Advanced',     personality: 'I see everything.',     useStockfish: true  },
+  { id: 'zenith',  name: 'Zenith',        emoji: '👑', depth: 14, label: 'Master',       personality: 'You must be precise.',  useStockfish: true  },
+  { id: 'phoenix', name: 'Phoenix Prime', emoji: '🔥', depth: 18, label: 'Maximum',      personality: 'This is your end.',     useStockfish: true  },
 ];
 
 const PROMOTION_PIECES = [
-  { value: 'q', label: '♛', name: 'Queen' },
-  { value: 'r', label: '♜', name: 'Rook' },
-  { value: 'b', label: '♝', name: 'Bishop' },
-  { value: 'n', label: '♞', name: 'Knight' },
+  { value: 'q', name: 'Queen' },
+  { value: 'r', name: 'Rook' },
+  { value: 'b', name: 'Bishop' },
+  { value: 'n', name: 'Knight' },
 ];
 
 const PIECE_IMAGES = {
@@ -34,6 +35,24 @@ const PIECE_IMAGES = {
   bn: 'https://www.chess.com/chess-themes/pieces/neo/150/bn.png',
 };
 
+// Simple fallback bot (for Astra or if Stockfish fails)
+function getSimpleMove(fen, depth) {
+  const tempGame = new Chess(fen);
+  const moves = tempGame.moves({ verbose: true });
+  if (!moves.length) return null;
+  const pieceValues = { p:1, n:3, b:3, r:5, q:9, k:0 };
+  const scored = moves.map(move => {
+    let score = 0;
+    if (move.captured) score += pieceValues[move.captured] * 10;
+    if (['d4','d5','e4','e5'].includes(move.to)) score += 3;
+    if (move.piece === 'p' && (move.to[1] === '7' || move.to[1] === '2')) score += 5;
+    score += Math.random() * depth * 3;
+    return { move, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0].move;
+}
+
 export default function NormalChess({ timerMode, onBack }) {
   const [selectedBot, setSelectedBot] = useState(null);
   const [game, setGame] = useState(new Chess());
@@ -43,21 +62,38 @@ export default function NormalChess({ timerMode, onBack }) {
   const [checkSquare, setCheckSquare] = useState(null);
   const [gameOver, setGameOver] = useState(null);
   const [history, setHistory] = useState([]);
-  const [whiteTime, setWhiteTime] = useState(timerMode?.seconds || 600);
-  const [blackTime, setBlackTime] = useState(timerMode?.seconds || 600);
-  const [timerRunning, setTimerRunning] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [promotionMove, setPromotionMove] = useState(null);
+  const [resignConfirm, setResignConfirm] = useState(false);
+  const [drawOffer, setDrawOffer] = useState(false);
+
+  // Timer with increment support
+  const [whiteTime, setWhiteTime] = useState(timerMode?.seconds || 600);
+  const [blackTime, setBlackTime] = useState(timerMode?.seconds || 600);
+  const [increment] = useState(timerMode?.increment || 0);
+  const [timerRunning, setTimerRunning] = useState(false);
 
   const timerRef = useRef(null);
   const gameRef = useRef(game);
+  const engineRef = useRef(null);
+  const botLock = useRef(false);
   gameRef.current = game;
+
+  // Init Stockfish engine
+  useEffect(() => {
+    engineRef.current = createStockfish();
+    return () => {
+      engineRef.current?.terminate();
+      engineRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedBot) return;
     playGameStartSound();
   }, [selectedBot]);
 
+  // Timer
   useEffect(() => {
     if (!timerRunning || gameOver) return;
     timerRef.current = setInterval(() => {
@@ -70,6 +106,12 @@ export default function NormalChess({ timerMode, onBack }) {
     }, 1000);
     return () => clearInterval(timerRef.current);
   }, [timerRunning, gameOver]);
+
+  const addIncrement = useCallback((color) => {
+    if (increment <= 0) return;
+    if (color === 'w') setWhiteTime(t => t + increment);
+    else setBlackTime(t => t + increment);
+  }, [increment]);
 
   const endByTimeout = (color) => {
     clearInterval(timerRef.current);
@@ -104,6 +146,7 @@ export default function NormalChess({ timerMode, onBack }) {
         setLastMove({ from: result.from, to: result.to });
         setHistory(newGame.history({ verbose: true }));
         updateCheckSquare(newGame);
+        addIncrement('b');
         if (newGame.isCheckmate()) {
           playCheckmateSound();
           setTimerRunning(false);
@@ -115,43 +158,42 @@ export default function NormalChess({ timerMode, onBack }) {
         return newGame;
       } catch { return prev; }
     });
-  }, [updateCheckSquare]);
+  }, [updateCheckSquare, addIncrement]);
 
-  const triggerBot = useCallback((fen, depth) => {
+  const triggerBot = useCallback(async (fen, bot) => {
+    if (botLock.current) return;
+    botLock.current = true;
     setIsThinking(true);
-    setTimeout(() => {
-      try {
-        const tempGame = new Chess(fen);
-        const moves = tempGame.moves({ verbose: true });
-        if (!moves.length) { setIsThinking(false); return; }
 
-        const pieceValues = { p:1, n:3, b:3, r:5, q:9, k:0 };
+    try {
+      if (bot.useStockfish && engineRef.current) {
+        // Use Stockfish — Phoenix Prime uses top 3 random selection
+        const useTopMoves = bot.depth >= 18;
+        const moveStr = await engineRef.current.getBestMove(fen, bot.depth, useTopMoves);
+        if (moveStr) {
+          applyBotMove(moveStr.slice(0, 2), moveStr.slice(2, 4), moveStr[4]);
+        } else {
+          // Fallback if Stockfish fails
+          const move = getSimpleMove(fen, bot.depth);
+          if (move) applyBotMove(move.from, move.to, move.promotion);
+        }
+      } else {
+        // Simple bot for Astra
+        await new Promise(r => setTimeout(r, 300 + Math.random() * 500));
+        const move = getSimpleMove(fen, bot.depth);
+        if (move) applyBotMove(move.from, move.to, move.promotion);
+      }
+    } catch {
+      const move = getSimpleMove(fen, bot.depth);
+      if (move) applyBotMove(move.from, move.to, move.promotion);
+    }
 
-        const scored = moves.map(move => {
-          let score = 0;
-          if (move.captured) score += pieceValues[move.captured] * 10;
-          if (['d4','d5','e4','e5'].includes(move.to)) score += 3;
-          if (move.piece === 'p' && (move.to[1] === '7' || move.to[1] === '2')) score += 5;
-          score += Math.random() * depth * 2;
-          return { move, score };
-        });
-
-        // Sort by score descending
-        scored.sort((a, b) => b.score - a.score);
-
-        // Phoenix Prime picks from top 3, others pick best
-        const poolSize = depth >= 18 ? 3 : 1;
-        const pool = scored.slice(0, poolSize);
-        const chosen = pool[Math.floor(Math.random() * pool.length)];
-
-        applyBotMove(chosen.move.from, chosen.move.to, chosen.move.promotion);
-      } catch {}
-      setIsThinking(false);
-    }, 400 + Math.random() * 800);
+    setIsThinking(false);
+    botLock.current = false;
   }, [applyBotMove]);
 
   const handleSquareClick = useCallback((square) => {
-    if (gameOver || isThinking || promotionMove) return;
+    if (gameOver || isThinking || promotionMove || resignConfirm) return;
     if (!timerRunning && history.length === 0) setTimerRunning(true);
 
     const turn = game.turn();
@@ -185,6 +227,7 @@ export default function NormalChess({ timerMode, onBack }) {
           updateCheckSquare(newGame);
           setSelectedSquare(null);
           setLegalMoves([]);
+          addIncrement('w');
           if (newGame.isCheckmate()) {
             playCheckmateSound();
             setTimerRunning(false);
@@ -193,7 +236,7 @@ export default function NormalChess({ timerMode, onBack }) {
             setTimerRunning(false);
             setGameOver({ result: 'Draw', reason: 'Stalemate or draw rule' });
           } else {
-            setTimeout(() => triggerBot(newGame.fen(), selectedBot.depth), 300);
+            setTimeout(() => triggerBot(newGame.fen(), selectedBot), 300);
           }
         } catch {}
       } else {
@@ -213,7 +256,7 @@ export default function NormalChess({ timerMode, onBack }) {
         setLegalMoves(game.moves({ square, verbose: true }).map(m => m.to));
       }
     }
-  }, [game, selectedSquare, legalMoves, gameOver, isThinking, timerRunning, history, selectedBot, triggerBot, updateCheckSquare, promotionMove]);
+  }, [game, selectedSquare, legalMoves, gameOver, isThinking, timerRunning, history, selectedBot, triggerBot, updateCheckSquare, promotionMove, resignConfirm, addIncrement]);
 
   const handlePromotion = (piece) => {
     if (!promotionMove) return;
@@ -227,6 +270,7 @@ export default function NormalChess({ timerMode, onBack }) {
       setGame(newGame);
       updateCheckSquare(newGame);
       setPromotionMove(null);
+      addIncrement('w');
       if (newGame.isCheckmate()) {
         playCheckmateSound();
         setTimerRunning(false);
@@ -235,9 +279,26 @@ export default function NormalChess({ timerMode, onBack }) {
         setTimerRunning(false);
         setGameOver({ result: 'Draw', reason: 'Stalemate or draw rule' });
       } else {
-        setTimeout(() => triggerBot(newGame.fen(), selectedBot.depth), 300);
+        setTimeout(() => triggerBot(newGame.fen(), selectedBot), 300);
       }
     } catch {}
+  };
+
+  const handleResign = () => {
+    if (!resignConfirm) { setResignConfirm(true); return; }
+    setTimerRunning(false);
+    setGameOver({ result: 'Black wins', reason: 'You resigned' });
+    setResignConfirm(false);
+  };
+
+  const handleDrawOffer = () => setDrawOffer(true);
+
+  const handleDrawResponse = (accept) => {
+    setDrawOffer(false);
+    if (accept) {
+      setTimerRunning(false);
+      setGameOver({ result: 'Draw', reason: 'Draw agreement' });
+    }
   };
 
   const handleRestart = () => {
@@ -254,10 +315,14 @@ export default function NormalChess({ timerMode, onBack }) {
     setTimerRunning(false);
     setIsThinking(false);
     setPromotionMove(null);
+    setResignConfirm(false);
+    setDrawOffer(false);
+    botLock.current = false;
     playGameStartSound();
   };
 
   const handleUndo = () => {
+    if (isThinking) return;
     const newGame = new Chess();
     const hist = game.history();
     hist.slice(0, -2).forEach(m => newGame.move(m));
@@ -267,15 +332,15 @@ export default function NormalChess({ timerMode, onBack }) {
     setLastMove(null);
     updateCheckSquare(newGame);
     setHistory(newGame.history({ verbose: true }));
-    setIsThinking(false);
     setPromotionMove(null);
+    setResignConfirm(false);
   };
 
   if (!selectedBot) {
     return (
       <div className="min-h-screen bg-background flex flex-col font-inter">
         <div className="flex items-center px-4 py-3 border-b border-border">
-          <button onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground transition-colors">← Menu</button>
+          <button onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground">← Menu</button>
           <h2 className="flex-1 text-center font-bold text-foreground">Choose Your Opponent</h2>
           <div className="w-12" />
         </div>
@@ -308,25 +373,59 @@ export default function NormalChess({ timerMode, onBack }) {
         gameStatus={game.inCheck() && !game.isGameOver() ? '⚠ Check!' : null}
       />
 
+      {/* Promotion Modal */}
       {promotionMove && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-card border border-border rounded-2xl p-6 text-center shadow-2xl">
             <h3 className="text-foreground font-bold text-lg mb-4">Choose Promotion</h3>
             <div className="flex gap-3">
               {PROMOTION_PIECES.map(p => (
-                <button
-                  key={p.value}
-                  onClick={() => handlePromotion(p.value)}
-                  className="flex flex-col items-center gap-1 p-3 rounded-xl border border-border bg-secondary hover:bg-primary/20 hover:border-primary transition-all"
-                >
-                  <img
-                    src={PIECE_IMAGES['w' + p.value]}
-                    alt={p.name}
-                    style={{ width: '48px', height: '48px' }}
-                  />
+                <button key={p.value} onClick={() => handlePromotion(p.value)}
+                  className="flex flex-col items-center gap-1 p-3 rounded-xl border border-border bg-secondary hover:bg-primary/20 hover:border-primary transition-all">
+                  <img src={PIECE_IMAGES['w' + p.value]} alt={p.name} style={{ width: '48px', height: '48px' }} />
                   <span className="text-xs text-muted-foreground">{p.name}</span>
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Resign Confirmation */}
+      {resignConfirm && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-card border border-border rounded-2xl p-6 text-center shadow-2xl w-72">
+            <h3 className="text-foreground font-bold text-lg mb-2">Resign?</h3>
+            <p className="text-muted-foreground text-sm mb-4">Are you sure you want to resign?</p>
+            <div className="flex gap-3">
+              <button onClick={() => setResignConfirm(false)}
+                className="flex-1 py-2 rounded-xl border border-border text-foreground font-semibold hover:bg-secondary transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleResign}
+                className="flex-1 py-2 rounded-xl bg-red-500 text-white font-bold hover:bg-red-600 transition-colors">
+                Resign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Draw Offer Modal */}
+      {drawOffer && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-card border border-border rounded-2xl p-6 text-center shadow-2xl w-72">
+            <h3 className="text-foreground font-bold text-lg mb-2">🤝 Offer Draw?</h3>
+            <p className="text-muted-foreground text-sm mb-4">The bot will consider your draw offer.</p>
+            <div className="flex gap-3">
+              <button onClick={() => handleDrawResponse(false)}
+                className="flex-1 py-2 rounded-xl border border-border text-foreground font-semibold hover:bg-secondary transition-colors">
+                Cancel
+              </button>
+              <button onClick={() => handleDrawResponse(Math.random() > 0.5)}
+                className="flex-1 py-2 rounded-xl bg-primary text-primary-foreground font-bold hover:bg-primary/90 transition-colors">
+                Offer
+              </button>
             </div>
           </div>
         </div>
@@ -357,6 +456,7 @@ export default function NormalChess({ timerMode, onBack }) {
             <span className="text-sm font-bold text-foreground">You (White)</span>
           </div>
         </div>
+
         <div className="flex flex-col gap-3 w-full max-w-xs lg:max-w-[240px]">
           <GameTimer
             whiteTime={whiteTime}
@@ -364,6 +464,13 @@ export default function NormalChess({ timerMode, onBack }) {
             activeColor={game.turn()}
             isRunning={timerRunning}
           />
+
+          {increment > 0 && (
+            <div className="text-xs text-center text-muted-foreground">
+              +{increment}s increment per move
+            </div>
+          )}
+
           <div className="flex gap-2">
             <button onClick={handleUndo} disabled={history.length < 2}
               className="flex-1 py-2 text-xs rounded-lg bg-secondary text-foreground hover:bg-secondary/80 disabled:opacity-40 transition-colors font-medium">
@@ -374,17 +481,5 @@ export default function NormalChess({ timerMode, onBack }) {
               ↺ Restart
             </button>
           </div>
-          <div className="flex-1 min-h-0" style={{ height: '300px' }}>
-            <MoveHistory history={history} />
-          </div>
-        </div>
-      </div>
-      <GameOverModal
-        result={gameOver?.result}
-        reason={gameOver?.reason}
-        onRematch={handleRestart}
-        onMenu={onBack}
-      />
-    </div>
-  );
-        }
+
+          <div className="flex gap-2">
