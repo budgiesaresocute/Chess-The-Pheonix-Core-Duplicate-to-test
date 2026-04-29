@@ -1,32 +1,33 @@
 import React from 'react';
-import { PIECE_DICE_VALUES } from '../../lib/phoenixCoreLogic';
 
 const DICE_PIECE_MAP = {
-  1: { piece: 'Pawn', icon: '♟' },
+  1: { piece: 'Pawn',   icon: '♟' },
   2: { piece: 'Knight', icon: '♞' },
   3: { piece: 'Bishop', icon: '♝' },
-  4: { piece: 'Rook', icon: '♜' },
-  5: { piece: 'Queen', icon: '♛' },
-  6: { piece: 'King', icon: '♚' },
+  4: { piece: 'Rook',   icon: '♜' },
+  5: { piece: 'Queen',  icon: '♛' },
+  6: { piece: 'King',   icon: '♚' },
 };
 
 export default function PhoenixPanel({
   currentTurn, phoenixState, diceValue,
-  mustMovePhoenix, phoenixSelected,
-  onSelectPhoenix, onRollDice, turnCount
+  hasRolledThisTurn, mustMovePhoenix, phoenixSelected,
+  onSelectPhoenix, onRollDice, turnCount,
 }) {
   const active = phoenixState.active[currentTurn];
   const used = phoenixState.used[currentTurn];
   const pos = phoenixState.positions[currentTurn];
   const turnsSince = phoenixState.turnsSinceMoved[currentTurn] || 0;
+  // FIX: can only roll on turn 3 (mustMove) OR optionally let them roll any turn
+  // but only ONCE per turn. Button is disabled after rolling.
+  const canRoll = active && !hasRolledThisTurn && !mustMovePhoenix;
+  const mustRoll = active && mustMovePhoenix && !diceValue;
 
   return (
     <div className="bg-card rounded-xl border border-border p-3 space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-xs font-bold text-foreground">🔥 Phoenix Core</span>
-        <span className="text-xs text-muted-foreground">
-          {currentTurn === 'w' ? '🔵 White' : '🔴 Black'}
-        </span>
+        <span className="text-xs text-muted-foreground">{currentTurn === 'w' ? '🔵 White' : '🔴 Black'}</span>
       </div>
 
       {!active && (
@@ -39,16 +40,25 @@ export default function PhoenixPanel({
         <>
           <div className="text-xs text-muted-foreground">
             Position: <span className="text-foreground font-mono font-bold">{pos?.toUpperCase() || '?'}</span>
-            {mustMovePhoenix && <span className="text-red-400 ml-2">Must move!</span>}
-            {!mustMovePhoenix && <span className="ml-2">({3 - turnsSince} turns left)</span>}
+            {mustMovePhoenix
+              ? <span className="text-red-400 ml-2 font-bold">Must move!</span>
+              : <span className="ml-2">({3 - turnsSince} turns until forced)</span>
+            }
           </div>
 
           {!diceValue ? (
             <button
               onClick={onRollDice}
-              className="w-full py-2 text-xs rounded-lg bg-primary text-primary-foreground font-bold hover:bg-primary/90 transition-colors"
+              disabled={!canRoll && !mustRoll}
+              className={`w-full py-2 text-xs rounded-lg font-bold transition-colors ${
+                (canRoll || mustRoll)
+                  ? mustRoll
+                    ? 'bg-red-500 text-white animate-pulse'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                  : 'bg-secondary text-muted-foreground opacity-40 cursor-not-allowed'
+              }`}
             >
-              🎲 Roll Dice
+              {mustRoll ? '🎲 MUST Roll Dice!' : hasRolledThisTurn ? '🎲 Already Rolled' : '🎲 Roll Dice (optional)'}
             </button>
           ) : (
             <div className="space-y-1">
@@ -72,4 +82,4 @@ export default function PhoenixPanel({
       )}
     </div>
   );
-          }
+}
