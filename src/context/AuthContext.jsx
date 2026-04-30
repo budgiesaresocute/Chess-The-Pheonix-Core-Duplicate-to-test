@@ -1,79 +1,116 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const SERVER_URL = 'https://phoenix-chess-server.onrender.com';
+const TOKEN_KEY = 'phoenix_chess_token';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(() => localStorage.getItem('phoenix_token'));
+  const [token, setToken] = useState(() => {
+    try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+  });
   const [loading, setLoading] = useState(true);
 
+  // On app load, verify token and restore user
   useEffect(() => {
-    if (token) {
-      fetch(`${SERVER_URL}/profile/me`, {
-        headers: { Authorization: `Bearer ${token}` }
+    const savedToken = token;
+    if (!savedToken) { setLoading(false); return; }
+
+    fetch(`${SERVER_URL}/profile/me`, {
+      headers: { Authorization: `Bearer ${savedToken}` }
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.username) {
+          setUser(data);
+        } else {
+          // Token invalid, clear it
+          localStorage.removeItem(TOKEN_KEY);
+          setToken(null);
+        }
       })
-        .then(r => r.json())
-        .then(data => {
-          if (data.username) setUser(data);
-          else { setToken(null); localStorage.removeItem('phoenix_token'); }
-        })
-        .catch(() => {})
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+      .catch(() => {
+        // Server might be sleeping, keep token and try again later
+      })
+      .finally(() => setLoading(false));
   }, []);
 
-  const register = async (username, password) => {
+  const saveToken = (t) => {
+    setToken(t);
+    try { localStorage.setItem(TOKEN_KEY, t); } catch {}
+  };
+
+  const clearToken = () => {
+    setToken(null);
+    try { localStorage.removeItem(TOKEN_KEY); } catch {}
+  };
+
+  const register = async (username, password, email, phone) => {
     const res = await fetch(`${SERVER_URL}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, email, phone }),
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    setToken(data.token);
+    saveToken(data.token);
     setUser(data.user);
-    localStorage.setItem('phoenix_token', data.token);
     return data;
   };
 
-  const login = async (username, password) => {
+  const login = async (usernameOrEmail, password) => {
     const res = await fetch(`${SERVER_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username: usernameOrEmail, password }),
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    setToken(data.token);
+    saveToken(data.token);
     setUser(data.user);
-    localStorage.setItem('phoenix_token', data.token);
     return data;
   };
 
   const logout = async () => {
-    await fetch(`${SERVER_URL}/auth/logout`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    }).catch(() => {});
-    setToken(null);
+    try {
+      await fetch(`${SERVER_URL}/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {}
+    clearToken();
     setUser(null);
-    localStorage.removeItem('phoenix_token');
   };
 
   const refreshUser = async () => {
     if (!token) return;
+    try {
+      const res = await fetch(`${SERVER_URL}/profile/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.username) setUser(data);
+    } catch {}
+  };
+
+  const updateProfile = async (updates) => {
+    if (!token) return;
     const res = await fetch(`${SERVER_URL}/profile/me`, {
-      headers: { Authorization: `Bearer ${token}` }
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(updates),
     });
     const data = await res.json();
     if (data.username) setUser(data);
+    return data;
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, register, login, logout, refreshUser }}>
+    <AuthContext.Provider value={{
+      user, token, loading,
+      register, login, logout,
+      refreshUser, updateProfile,
+    }}>
       {children}
     </AuthContext.Provider>
   );
@@ -81,4 +118,4 @@ export function AuthProvider({ children }) {
 
 export function useAuth() {
   return useContext(AuthContext);
-}
+  }
