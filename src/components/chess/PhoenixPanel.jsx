@@ -18,21 +18,24 @@ export default function PhoenixPanel({
   const used = phoenixState.used[currentTurn];
   const pos = phoenixState.positions[currentTurn];
   const turnsSince = phoenixState.turnsSinceMoved[currentTurn] || 0;
-  // FIX: can only roll on turn 3 (mustMove) OR optionally let them roll any turn
-  // but only ONCE per turn. Button is disabled after rolling.
-  const canRoll = active && !hasRolledThisTurn && !mustMovePhoenix;
+  const turnsLeft = 3 - turnsSince;
+
+  // Can roll if: phoenix active, haven't rolled this turn, not in must-move state
+  const canRoll = active && !hasRolledThisTurn && !diceValue;
   const mustRoll = active && mustMovePhoenix && !diceValue;
 
   return (
     <div className="bg-card rounded-xl border border-border p-3 space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-xs font-bold text-foreground">🔥 Phoenix Core</span>
-        <span className="text-xs text-muted-foreground">{currentTurn === 'w' ? '🔵 White' : '🔴 Black'}</span>
+        <span className="text-xs text-muted-foreground">
+          {currentTurn === 'w' ? '🔵 White' : '🔴 Black'}
+        </span>
       </div>
 
       {!active && (
         <div className="text-xs text-muted-foreground text-center py-1">
-          {used ? 'Phoenix used ✓' : 'Phoenix gone'}
+          {used ? '✓ Phoenix used — revival done' : 'Phoenix gone'}
         </div>
       )}
 
@@ -41,8 +44,8 @@ export default function PhoenixPanel({
           <div className="text-xs text-muted-foreground">
             Position: <span className="text-foreground font-mono font-bold">{pos?.toUpperCase() || '?'}</span>
             {mustMovePhoenix
-              ? <span className="text-red-400 ml-2 font-bold">Must move!</span>
-              : <span className="ml-2">({3 - turnsSince} turns until forced)</span>
+              ? <span className="text-red-400 ml-2 font-bold animate-pulse"> ⚠ Must move!</span>
+              : <span className="ml-2 text-muted-foreground"> ({turnsLeft} turn{turnsLeft !== 1 ? 's' : ''} left)</span>
             }
           </div>
 
@@ -51,20 +54,24 @@ export default function PhoenixPanel({
               onClick={onRollDice}
               disabled={!canRoll && !mustRoll}
               className={`w-full py-2 text-xs rounded-lg font-bold transition-colors ${
-                (canRoll || mustRoll)
-                  ? mustRoll
-                    ? 'bg-red-500 text-white animate-pulse'
-                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
-                  : 'bg-secondary text-muted-foreground opacity-40 cursor-not-allowed'
+                mustRoll
+                  ? 'bg-red-500 text-white animate-pulse cursor-pointer'
+                  : canRoll
+                    ? 'bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer'
+                    : 'bg-secondary text-muted-foreground opacity-40 cursor-not-allowed'
               }`}
             >
-              {mustRoll ? '🎲 MUST Roll Dice!' : hasRolledThisTurn ? '🎲 Already Rolled' : '🎲 Roll Dice (optional)'}
+              {mustRoll
+                ? '🎲 MUST Roll Dice!'
+                : hasRolledThisTurn
+                  ? '🎲 Already rolled this turn'
+                  : '🎲 Roll Dice (optional)'}
             </button>
           ) : (
             <div className="space-y-1">
-              <div className="text-xs text-center">
+              <div className="text-xs text-center bg-secondary rounded-lg py-1">
                 Rolled: <span className="font-bold text-primary">{diceValue}</span>
-                {' → '}{DICE_PIECE_MAP[diceValue]?.icon} {DICE_PIECE_MAP[diceValue]?.piece} moves
+                {' → '}{DICE_PIECE_MAP[diceValue]?.icon} {DICE_PIECE_MAP[diceValue]?.piece} movement
               </div>
               <button
                 onClick={onSelectPhoenix}
@@ -74,7 +81,7 @@ export default function PhoenixPanel({
                     : 'bg-secondary text-foreground hover:bg-secondary/80'
                 }`}
               >
-                {phoenixSelected ? '🔥 Moving Phoenix...' : '🔥 Move Phoenix'}
+                {phoenixSelected ? '🔥 Tap destination to move Phoenix' : '🔥 Move Phoenix'}
               </button>
             </div>
           )}
@@ -82,4 +89,4 @@ export default function PhoenixPanel({
       )}
     </div>
   );
-}
+                }
