@@ -36,7 +36,6 @@ export default function PhoenixCore({ timerMode, onBack }) {
   const [phoenixState, setPhoenixState] = useState(createPhoenixState());
   const [phoenixSelected, setPhoenixSelected] = useState(false);
   const [diceValue, setDiceValue] = useState(null);
-  // FIX: track whether the current player has already rolled this turn
   const [hasRolledThisTurn, setHasRolledThisTurn] = useState(false);
   const [phoenixMoves, setPhoenixMoves] = useState([]);
   const [turnCount, setTurnCount] = useState(0);
@@ -81,11 +80,8 @@ export default function PhoenixCore({ timerMode, onBack }) {
   };
 
   const updateCheckSquare = useCallback((g) => {
-    if (g.inCheck()) {
-      setCheckSquare(findKingSquare(g, g.turn()));
-    } else {
-      setCheckSquare(null);
-    }
+    if (g.inCheck()) setCheckSquare(findKingSquare(g, g.turn()));
+    else setCheckSquare(null);
   }, []);
 
   const moveKingInFen = (fen, fromSq, toSq, color) => {
@@ -99,46 +95,38 @@ export default function PhoenixCore({ timerMode, onBack }) {
     const collapse = (arr) => {
       let s = '', e = 0;
       for (const ch of arr) ch === '.' ? e++ : (e && (s += e, e = 0), s += ch);
-      return s + (e || '');
+      return s + (e ? e : '');
     };
     const b = rows.map(expand);
-    const fc = (sq) => ({ f: sq.charCodeAt(0)-97, r: parseInt(sq[1])-1 });
+    const fc = (sq) => ({ f: sq.charCodeAt(0) - 97, r: parseInt(sq[1]) - 1 });
     const from = fc(fromSq), to = fc(toSq);
     b[7 - from.r][from.f] = '.';
     b[7 - to.r][to.f] = color === 'w' ? 'K' : 'k';
     parts[0] = b.map(collapse).join('/');
     parts[1] = parts[1] === 'w' ? 'b' : 'w';
-    parts[2] = '-'; parts[3] = '-';
+    parts[2] = '-';
+    parts[3] = '-';
     return parts.join(' ');
-  };
-
-  // FIX: Reliable revival — check if phoenix square is safe by temporarily removing
-  // the king and seeing if opponent can attack the phoenix square
-  const isSquareSafe = (fen, sq, attackerColor) => {
-    try {
-      // Build a position where it's the attacker's turn and check if they can reach sq
-      const parts = fen.split(' ');
-      parts[1] = attackerColor;
-      parts[2] = '-'; parts[3] = '-';
-      const testGame = new Chess(parts.join(' '));
-      const moves = testGame.moves({ verbose: true });
-      return !moves.some(m => m.to === sq);
-    } catch {
-      return false;
-    }
   };
 
   const handlePotentialRevival = useCallback((g, checkmatedColor, ps) => {
     const phoenixPos = ps.positions[checkmatedColor];
-    if (!ps.active[checkmatedColor] || !phoenixPos || ps.used[checkmatedColor]) return false;
+    const phoenixActive = ps.active[checkmatedColor];
+    const revivalUsed = ps.used[checkmatedColor];
+    if (!phoenixActive || !phoenixPos || revivalUsed) return false;
 
     const kingSquare = findKingSquare(g, checkmatedColor);
+    // Phoenix must be on a different square than king to teleport
     if (!kingSquare || phoenixPos === kingSquare) return false;
 
-    // FIX: check if the phoenix square is safe for the king to land on
-    const attackerColor = checkmatedColor === 'w' ? 'b' : 'w';
-    const safe = isSquareSafe(g.fen(), phoenixPos, attackerColor);
-    if (!safe) return false;
+    // Check phoenix square is not under attack
+    try {
+      const fenParts = g.fen().split(' ');
+      fenParts[1] = checkmatedColor === 'w' ? 'b' : 'w';
+      const attackerGame = new Chess(fenParts.join(' '));
+      const attackerMoves = attackerGame.moves({ verbose: true });
+      if (attackerMoves.some(m => m.to === phoenixPos)) return false;
+    } catch { return false; }
 
     const newFen = moveKingInFen(g.fen(), kingSquare, phoenixPos, checkmatedColor);
     if (!newFen) return false;
@@ -168,14 +156,6 @@ export default function PhoenixCore({ timerMode, onBack }) {
   const mustMovePhoenix = (ps, color) =>
     ps.active[color] && ps.positions[color] !== null && (ps.turnsSinceMoved[color] || 0) >= 3;
 
-  // FIX: After any move (phoenix or normal) switch turn resets roll state
-  const resetTurnRollState = () => {
-    setHasRolledThisTurn(false);
-    setDiceValue(null);
-    setPhoenixSelected(false);
-    setPhoenixMoves([]);
-  };
-
   const applyMove = useCallback((g, move) => {
     const newGame = new Chess(g.fen());
     let result;
@@ -189,15 +169,18 @@ export default function PhoenixCore({ timerMode, onBack }) {
     setHistory(newGame.history({ verbose: true }));
 
     const currentColor = g.turn();
-    setPhoenixState(prev => ({
-      ...prev,
-      turnsSinceMoved: {
-        ...prev.turnsSinceMoved,
-        [currentColor]: (prev.turnsSinceMoved[currentColor] || 0) + 1,
-      },
-    }));
+    setPhoenixState(prev => {
+      const newTurns = { ...prev.turnsSinceMoved };
+      newTurns[currentColor] = (newTurns[currentColor] || 0) + 1;
+      return { ...prev, turnsSinceMoved: newTurns };
+    });
+
+    // Reset dice and roll state for NEXT player's turn
     setTurnCount(t => t + 1);
-    resetTurnRollState(); // FIX: clear roll state for next player's turn
+    setDiceValue(null);
+    setHasRolledThisTurn(false);
+    setPhoenixSelected(false);
+    setPhoenixMoves([]);
 
     if (newGame.isCheckmate()) {
       const checkmatedColor = newGame.turn();
@@ -219,11 +202,11 @@ export default function PhoenixCore({ timerMode, onBack }) {
     return newGame;
   }, [updateCheckSquare, handlePotentialRevival]);
 
-  // FIX: Only allow rolling if hasn't rolled yet this turn
   const handleRollDice = () => {
-    if (hasRolledThisTurn) return; // already rolled
     const turn = game.turn();
-    if (!phoenixState.active[turn]) return;
+    const ps = phoenixStateRef.current;
+    // Only allow rolling if phoenix is active and hasn't rolled this turn
+    if (!ps.active[turn] || hasRolledThisTurn) return;
     const roll = rollDice(null);
     playDiceSound();
     setDiceValue(roll);
@@ -244,7 +227,8 @@ export default function PhoenixCore({ timerMode, onBack }) {
 
     const DICE_TO_PIECE = { 1:'p', 2:'n', 3:'b', 4:'r', 5:'q', 6:'k' };
     const pieceType = DICE_TO_PIECE[diceValue] || 'p';
-    const moves = getPhoenixMoves(phoenixPos, pieceType, game.board(), turn);
+    const board = game.board();
+    const moves = getPhoenixMoves(phoenixPos, pieceType, board, turn);
 
     setPhoenixSelected(true);
     setSelectedSquare(null);
@@ -261,10 +245,8 @@ export default function PhoenixCore({ timerMode, onBack }) {
     }));
     setPhoenixSelected(false);
     setPhoenixMoves([]);
-    // FIX: Phoenix move does NOT end the turn and does NOT consume the normal move.
-    // But we clear the dice so the player can't re-roll.
     setDiceValue(null);
-    // Keep hasRolledThisTurn = true so they can't roll again this turn
+    setHasRolledThisTurn(false);
     playMoveSound();
     setSelectedSquare(null);
     setLegalMoves([]);
@@ -297,7 +279,11 @@ export default function PhoenixCore({ timerMode, onBack }) {
       if (legalMoves.includes(square)) {
         const moves = game.moves({ square: selectedSquare, verbose: true });
         const move = moves.find(m => m.to === square);
-        applyMove(game, { from: selectedSquare, to: square, promotion: move?.promotion ? 'q' : undefined });
+        applyMove(game, {
+          from: selectedSquare,
+          to: square,
+          promotion: move?.promotion ? 'q' : undefined,
+        });
         setSelectedSquare(null);
         setLegalMoves([]);
       } else {
@@ -323,11 +309,17 @@ export default function PhoenixCore({ timerMode, onBack }) {
   const handleRestart = () => {
     const newGame = new Chess();
     setGame(newGame);
-    setSelectedSquare(null); setLegalMoves([]); setLastMove(null);
-    setCheckSquare(null); setGameOver(null); setHistory([]);
+    setSelectedSquare(null);
+    setLegalMoves([]);
+    setLastMove(null);
+    setCheckSquare(null);
+    setGameOver(null);
+    setHistory([]);
     setPhoenixState(createPhoenixState());
-    setPhoenixSelected(false); setDiceValue(null); setPhoenixMoves([]);
+    setPhoenixSelected(false);
+    setDiceValue(null);
     setHasRolledThisTurn(false);
+    setPhoenixMoves([]);
     setTurnCount(0);
     setWhiteTime(timerMode?.seconds || 600);
     setBlackTime(timerMode?.seconds || 600);
@@ -340,7 +332,11 @@ export default function PhoenixCore({ timerMode, onBack }) {
 
   return (
     <div className="min-h-screen bg-background flex flex-col font-inter">
-      <GameHeader mode="phoenix" onBack={onBack} gameStatus={game.inCheck() && !game.isGameOver() ? '⚠ Check!' : null} />
+      <GameHeader
+        mode="phoenix"
+        onBack={onBack}
+        gameStatus={game.inCheck() && !game.isGameOver() ? '⚠ Check!' : null}
+      />
 
       {revivalNotif && (
         <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 bg-orange-500/90 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-xl animate-bounce">
@@ -389,7 +385,12 @@ export default function PhoenixCore({ timerMode, onBack }) {
         </div>
 
         <div className="flex flex-col gap-3 w-full max-w-xs">
-          <GameTimer whiteTime={whiteTime} blackTime={blackTime} activeColor={currentTurn} isRunning={timerRunning} />
+          <GameTimer
+            whiteTime={whiteTime}
+            blackTime={blackTime}
+            activeColor={currentTurn}
+            isRunning={timerRunning}
+          />
 
           {currentMustMove && (
             <div className="bg-red-500/20 border border-red-500 rounded-xl p-3 text-center">
@@ -411,11 +412,19 @@ export default function PhoenixCore({ timerMode, onBack }) {
 
           <div className="flex gap-2">
             <button onClick={() => {
+              if (history.length < 2) return;
               const newGame = new Chess();
-              game.history().slice(0, -2).forEach(m => newGame.move(m));
-              setGame(newGame); setSelectedSquare(null); setLegalMoves([]);
-              setLastMove(null); setPhoenixSelected(false); setPhoenixMoves([]);
-              resetTurnRollState(); updateCheckSquare(newGame);
+              const hist = game.history();
+              hist.slice(0, -2).forEach(m => newGame.move(m));
+              setGame(newGame);
+              setSelectedSquare(null);
+              setLegalMoves([]);
+              setLastMove(null);
+              setPhoenixSelected(false);
+              setPhoenixMoves([]);
+              setDiceValue(null);
+              setHasRolledThisTurn(false);
+              updateCheckSquare(newGame);
               setHistory(newGame.history({ verbose: true }));
             }} disabled={history.length < 2}
               className="flex-1 py-2 text-xs rounded-lg bg-secondary text-foreground hover:bg-secondary/80 disabled:opacity-40 transition-colors font-medium">
@@ -427,22 +436,28 @@ export default function PhoenixCore({ timerMode, onBack }) {
             </button>
           </div>
 
-          <div style={{ height:'220px' }}>
+          <div style={{ height: '220px' }}>
             <MoveHistory history={history} />
           </div>
 
           <div className="text-xs text-muted-foreground bg-card rounded-lg p-3 border border-border space-y-1">
             <div className="font-semibold text-foreground mb-1">🔥 Phoenix Rules</div>
             <div>• Phoenix starts on your King</div>
-            <div>• Roll dice once every 3 turns to move Phoenix</div>
-            <div>• Must move Phoenix on turn 3 or you can't move</div>
-            <div>• On checkmate, King teleports to Phoenix</div>
+            <div>• Roll dice to move Phoenix (optional each turn)</div>
+            <div>• Must move Phoenix every 3 turns or you can't play</div>
+            <div>• Moving Phoenix doesn't cost your normal turn</div>
+            <div>• On checkmate, King teleports to Phoenix position</div>
             <div>• One revival per game</div>
           </div>
         </div>
       </div>
 
-      <GameOverModal result={gameOver?.result} reason={gameOver?.reason} onRematch={handleRestart} onMenu={onBack} />
+      <GameOverModal
+        result={gameOver?.result}
+        reason={gameOver?.reason}
+        onRematch={handleRestart}
+        onMenu={onBack}
+      />
     </div>
   );
   }
