@@ -470,4 +470,36 @@ export default function NormalChess({ timerMode, onBack }) {
 
         <div className="flex flex-col gap-3 w-full max-w-xs lg:max-w-[240px]">
           <GameTimer whiteTime={whiteTime} blackTime={blackTime} activeColor={game.turn()} isRunning={timerRunning} />
-          {incremen
+          {increment > 0 && (
+            <div className="text-xs text-center text-muted-foreground">+{increment}s increment per move</div>
+          )}
+          <div className="flex gap-2">
+            <button onClick={handleUndo} disabled={history.length < 2}
+              className="flex-1 py-2 text-xs rounded-lg bg-secondary text-foreground hover:bg-secondary/80 disabled:opacity-40 transition-colors font-medium">
+              ↩ Undo
+            </button>
+            <button onClick={handleRestart}
+              className="flex-1 py-2 text-xs rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors font-medium">
+              ↺ Restart
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={handleResign}
+              className="flex-1 py-2 text-xs rounded-lg bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors font-medium">
+              🏳 Resign
+            </button>
+            <button onClick={() => setDrawOffer(true)}
+              className="flex-1 py-2 text-xs rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors font-medium">
+              🤝 Draw
+            </button>
+          </div>
+          <div className="flex-1 min-h-0" style={{ height: '260px' }}>
+            <MoveHistory history={history} />
+          </div>
+        </div>
+      </div>
+
+      <GameOverModal result={gameOver?.result} reason={gameOver?.reason} onRematch={handleRestart} onMenu={onBack} />
+    </div>
+  );
+}
