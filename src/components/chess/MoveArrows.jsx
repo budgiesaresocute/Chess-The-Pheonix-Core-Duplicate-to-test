@@ -19,14 +19,14 @@ export default function MoveArrows({ arrows = [], flipped = false }) {
       viewBox="0 0 8 8"
     >
       <defs>
-        <marker id="mah-orange" markerWidth="0.5" markerHeight="0.5" refX="0.4" refY="0.25" orient="auto">
-          <polygon points="0 0,0.5 0.25,0 0.5" fill="rgba(255,140,0,0.9)" />
+        <marker id="mah-orange" markerWidth="0.6" markerHeight="0.6" refX="0.45" refY="0.3" orient="auto">
+          <polygon points="0 0,0.6 0.3,0 0.6" fill="rgba(255,140,0,0.95)" />
         </marker>
-        <marker id="mah-blue" markerWidth="0.5" markerHeight="0.5" refX="0.4" refY="0.25" orient="auto">
-          <polygon points="0 0,0.5 0.25,0 0.5" fill="rgba(0,150,255,0.9)" />
+        <marker id="mah-blue" markerWidth="0.6" markerHeight="0.6" refX="0.45" refY="0.3" orient="auto">
+          <polygon points="0 0,0.6 0.3,0 0.6" fill="rgba(0,150,255,0.95)" />
         </marker>
-        <marker id="mah-green" markerWidth="0.5" markerHeight="0.5" refX="0.4" refY="0.25" orient="auto">
-          <polygon points="0 0,0.5 0.25,0 0.5" fill="rgba(0,200,80,0.9)" />
+        <marker id="mah-green" markerWidth="0.6" markerHeight="0.6" refX="0.45" refY="0.3" orient="auto">
+          <polygon points="0 0,0.6 0.3,0 0.6" fill="rgba(0,200,80,0.95)" />
         </marker>
       </defs>
       {arrows.map((a, i) => {
@@ -34,18 +34,24 @@ export default function MoveArrows({ arrows = [], flipped = false }) {
         const f = center(a.from), t = center(a.to);
         const dx = t.x - f.x, dy = t.y - f.y;
         const len = Math.sqrt(dx*dx + dy*dy);
-        const ex = t.x - (dx/len)*0.3, ey = t.y - (dy/len)*0.3;
+        if (len === 0) return null;
+        // Shorten end so arrowhead doesn't overlap
+        const ex = t.x - (dx/len)*0.35, ey = t.y - (dy/len)*0.35;
         const color = a.color || 'orange';
-        const strokeMap = { orange:'rgba(255,140,0,0.8)', blue:'rgba(0,150,255,0.8)', green:'rgba(0,200,80,0.8)' };
+        const strokeMap = {
+          orange: 'rgba(255,140,0,0.8)',
+          blue: 'rgba(0,150,255,0.8)',
+          green: 'rgba(0,200,80,0.8)'
+        };
         return (
           <line key={i}
             x1={f.x} y1={f.y} x2={ex} y2={ey}
             stroke={strokeMap[color] || strokeMap.orange}
-            strokeWidth="0.18" strokeLinecap="round"
+            strokeWidth="0.2" strokeLinecap="round"
             markerEnd={`url(#mah-${color})`}
           />
         );
       })}
     </svg>
   );
-}
+    }
