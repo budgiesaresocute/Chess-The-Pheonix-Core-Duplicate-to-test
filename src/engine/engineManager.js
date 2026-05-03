@@ -2,97 +2,62 @@ import { createStockfish } from "./stockfish.js";
 
 let cluster = null;
 let fallback = null;
-let isInit = false;
 
 // ================= INIT =================
 export function initEngine() {
-  if (isInit) return;
-  isInit = true;
+  if (!cluster) {
+    cluster = new Worker("/stockfish-worker.js");
+    cluster.postMessage({ cmd: "init" });
+  }
 
-  // MAIN ENGINE (cluster worker)
-  cluster = new Worker("/stockfish-worker.js");
+  if (!fallback) {
+    fallback = createStockfish();
+  }
+}
 
-  cluster.postMessage({ cmd: "init" });
+// ================= TIME CONTROL (NEW LICHESS STYLE) =================
+function getThinkTime(depth) {
+  const MIN_TIME = 1200; // minimum thinking time
+  const MAX_TIME = 6000; // max cap
 
-  // FALLBACK ENGINE
-  fallback = createStockfish();
-
-  console.log("🔥 Engine Manager initialized");
+  const time = MIN_TIME + depth * 120;
+  return Math.min(MAX_TIME, time);
 }
 
 // ================= MAIN BOT API =================
 export function getBestMove(fen, depth = 10, mpv = 1) {
   return new Promise((resolve) => {
-    if (!cluster) initEngine();
-
     let done = false;
+    let fallbackTriggered = false;
+
+    const thinkTime = getThinkTime(depth);
 
     // ================= FALLBACK SAFETY =================
     const timeout = setTimeout(async () => {
-      if (done) return;
+      if (done || fallbackTriggered) return;
+
+      fallbackTriggered = true;
       done = true;
 
-      try {
-        const move = await fallback.getBestMove(fen, depth, mpv);
-        resolve(move || null);
-      } catch {
-        resolve(null);
-      }
-    }, 3500);
+      const move = await fallback.getBestMove(fen, depth, mpv);
+      resolve(move);
+    }, thinkTime + 500); // slightly above engine thinking window
 
     // ================= CLUSTER RESPONSE =================
-    const handler = (e) => {
+    cluster.onmessage = (e) => {
       if (done) return;
 
       if (e.data?.type === "result") {
+        fallbackTriggered = true;
         done = true;
-        clearTimeout(timeout);
 
-        cluster.removeEventListener("message", handler);
+        clearTimeout(timeout);
 
         resolve(e.data.moves?.[0] || null);
       }
     };
 
-    cluster.addEventListener("message", handler);
-
-    cluster.postMessage({
-      cmd: "search",
-      fen,
-      depth,
-      mpv
-    });
-  });
-}
-
-// ================= OPTIONAL: TOP MOVES =================
-export function getTopMoves(fen, depth = 10, mpv = 3) {
-  return new Promise((resolve) => {
-    let done = false;
-
-    const timeout = setTimeout(async () => {
-      if (done) return;
-      done = true;
-
-      const move = await fallback.getBestMoveFromPool(fen, depth, mpv);
-      resolve(move ? [move] : []);
-    }, 3500);
-
-    const handler = (e) => {
-      if (done) return;
-
-      if (e.data?.type === "result") {
-        done = true;
-        clearTimeout(timeout);
-
-        cluster.removeEventListener("message", handler);
-
-        resolve(e.data.moves || []);
-      }
-    };
-
-    cluster.addEventListener("message", handler);
-
+    // ================= SEND TO CLUSTER =================
     cluster.postMessage({
       cmd: "search",
       fen,
