@@ -1,5 +1,6 @@
 // =====================================
-// Phoenix CORE++ Stockfish Cluster (v11.2 FINAL)
+// Phoenix CORE++ Stockfish Cluster (v11.2 LICHESS STYLE)
+// Stability-first • Eval-driven • Anti-blunder layer
 // =====================================
 
 const MAX_ENGINES = 2;
@@ -18,15 +19,15 @@ const ENGINE_STATE = {
 
 const slots = [];
 let session = 0;
-
-let activeRequestId = 0; // 🔥 RACE FIX (final)
-
+let currentRequest = null;
+let activeRequestId = 0;
 let watchdogTimer = null;
 
 const resultCache = new Map();
 const pvMap = new Map();
+const stabilityMap = new Map(); // 🔥 NEW
 
-let initialized = false; // 🔥 INIT FIX
+let initialized = false;
 
 const now = () => Date.now();
 const clamp = (n, min, max) => Math.min(Math.max(n, min), max);
@@ -161,32 +162,20 @@ function markDead(i) {
   s.state = ENGINE_STATE.DEAD;
   s.job = null;
 
-  pvMap.clear(); // 🔥 safety cleanup
+  pvMap.clear();
+  stabilityMap.clear(); // 🔥 NEW
 
   disposeWorker(s);
-
   setTimeout(() => spawnSlot(i), 800);
 }
 
-// ================= ENGINE PICK (LOAD BALANCED) =================
+// ================= ENGINE PICK =================
 function getEngine() {
-  let best = -1;
-  let minLoad = Infinity;
-
   for (let i = 0; i < slots.length; i++) {
     const s = slots[i];
-
-    if (s?.state === ENGINE_STATE.READY && !s.job) {
-      const load = s.lastSearchTick || 0;
-
-      if (load < minLoad) {
-        minLoad = load;
-        best = i;
-      }
-    }
+    if (s?.state === ENGINE_STATE.READY && !s.job) return i;
   }
-
-  return best;
+  return -1;
 }
 
 // ================= SEARCH =================
@@ -200,10 +189,13 @@ function startSearch(fen, depth, mpv) {
     depth,
     mpv: clamp(mpv || 1, 1, MAX_PV),
     done: false,
-    id: ++activeRequestId // 🔥 RACE FIX
+    id: ++activeRequestId
   };
 
+  currentRequest = req;
+
   pvMap.clear();
+  stabilityMap.clear();
 
   const cached = getCache(cacheKey(fen, depth, req.mpv));
   if (cached) {
@@ -269,7 +261,7 @@ function onEngineMsg(i, line) {
 
   if (s.state !== ENGINE_STATE.BUSY) return;
 
-  // ================= PV SAFE =================
+  // ================= PV =================
   if (line.startsWith("info") && line.includes(" pv ")) {
     const idx = line.indexOf(" pv ");
     if (idx === -1) return;
@@ -283,31 +275,49 @@ function onEngineMsg(i, line) {
     const id = mpv?.[1] ? +mpv[1] : 1;
     const d = depth ? +depth[1] : 0;
 
+    const score = mate ? 999999 : (cp ? +cp[1] : 0);
+    const move = pv[0];
+
     const prev = pvMap.get(id);
 
     if (!prev || d >= prev.depth) {
-      pvMap.set(id, {
-        move: pv[0],
-        depth: d,
-        score: mate ? 999999 : (cp ? +cp[1] : 0)
-      });
+      pvMap.set(id, { move, depth: d, score });
     }
+
+    // 🔥 STABILITY TRACKING
+    stabilityMap.set(move, (stabilityMap.get(move) || 0) + 1);
   }
 
+  // ================= BESTMOVE =================
   if (line.startsWith("bestmove")) {
     s.state = ENGINE_STATE.READY;
     s.job = null;
 
     const best = line.split(" ")[1];
 
-    const moves = [...pvMap.values()]
-      .sort((a, b) => b.depth - a.depth)
-      .map(v => v.move)
-      .filter(Boolean);
+    const sorted = [...pvMap.values()]
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.depth - a.depth;
+      });
 
-    finish(currentRequest, moves.length ? moves : [best]);
+    let chosen = sorted[0]?.move || best;
+
+    // 🔥 LICHESS-STYLE: prefer stable move
+    let max = 0;
+    for (const [move, count] of stabilityMap.entries()) {
+      if (count > max) {
+        max = count;
+        chosen = move;
+      }
+    }
+
+    const finalMove = max >= 2 ? chosen : (sorted[0]?.move || best);
+
+    finish(currentRequest, [finalMove]);
 
     pvMap.clear();
+    stabilityMap.clear();
   }
 }
 
@@ -329,12 +339,12 @@ function startWatchdog() {
   }, 2000);
 }
 
-// ================= INIT (FIXED) =================
+// ================= INIT =================
 self.onmessage = (e) => {
   const { cmd, fen, depth, mpv } = e.data;
 
   if (cmd === "init") {
-    if (initialized) return; // 🔥 FIX
+    if (initialized) return;
     initialized = true;
 
     if (!slots.length) {
