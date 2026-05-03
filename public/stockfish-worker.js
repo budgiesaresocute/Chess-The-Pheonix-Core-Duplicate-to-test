@@ -1,6 +1,5 @@
 // =====================================
-// Phoenix CORE++ Stockfish Cluster (v11.1 STABLE)
-// Multi-engine pool • Race-safe • Load-balanced • PV-safe
+// Phoenix CORE++ Stockfish Cluster (v11.2 FINAL)
 // =====================================
 
 const MAX_ENGINES = 2;
@@ -19,11 +18,15 @@ const ENGINE_STATE = {
 
 const slots = [];
 let session = 0;
-let currentRequest = null;
+
+let activeRequestId = 0; // 🔥 RACE FIX (final)
+
 let watchdogTimer = null;
 
 const resultCache = new Map();
 const pvMap = new Map();
+
+let initialized = false; // 🔥 INIT FIX
 
 const now = () => Date.now();
 const clamp = (n, min, max) => Math.min(Math.max(n, min), max);
@@ -157,12 +160,15 @@ function markDead(i) {
 
   s.state = ENGINE_STATE.DEAD;
   s.job = null;
+
+  pvMap.clear(); // 🔥 safety cleanup
+
   disposeWorker(s);
 
   setTimeout(() => spawnSlot(i), 800);
 }
 
-// ================= ENGINE PICK (FIXED LOAD BALANCE) =================
+// ================= ENGINE PICK (LOAD BALANCED) =================
 function getEngine() {
   let best = -1;
   let minLoad = Infinity;
@@ -194,10 +200,8 @@ function startSearch(fen, depth, mpv) {
     depth,
     mpv: clamp(mpv || 1, 1, MAX_PV),
     done: false,
-    id: Math.random()
+    id: ++activeRequestId // 🔥 RACE FIX
   };
-
-  currentRequest = req;
 
   pvMap.clear();
 
@@ -216,8 +220,7 @@ function startSearch(fen, depth, mpv) {
   const s = slots[id];
   s.job = req;
   s.state = ENGINE_STATE.BUSY;
-
-  s.lastSearchTick = now(); // 🔥 FIX
+  s.lastSearchTick = now();
 
   try {
     s.worker.postMessage("stop");
@@ -236,7 +239,7 @@ function startSearch(fen, depth, mpv) {
 
 // ================= FINISH =================
 function finish(req, moves) {
-  if (!req || req.done || req.session !== session || req !== currentRequest) return;
+  if (!req || req.done || req.session !== session || req.id !== activeRequestId) return;
 
   req.done = true;
 
@@ -266,14 +269,12 @@ function onEngineMsg(i, line) {
 
   if (s.state !== ENGINE_STATE.BUSY) return;
 
-  // ================= PV SAFE PARSE =================
+  // ================= PV SAFE =================
   if (line.startsWith("info") && line.includes(" pv ")) {
     const idx = line.indexOf(" pv ");
     if (idx === -1) return;
 
     const pv = line.slice(idx + 4).trim().split(/\s+/);
-    if (!pv.length) return;
-
     const mpv = line.match(/multipv (\d+)/);
     const depth = line.match(/depth (\d+)/);
     const cp = line.match(/score cp (-?\d+)/);
@@ -328,14 +329,18 @@ function startWatchdog() {
   }, 2000);
 }
 
-// ================= INIT =================
+// ================= INIT (FIXED) =================
 self.onmessage = (e) => {
   const { cmd, fen, depth, mpv } = e.data;
 
   if (cmd === "init") {
+    if (initialized) return; // 🔥 FIX
+    initialized = true;
+
     if (!slots.length) {
       for (let i = 0; i < MAX_ENGINES; i++) slots[i] = makeSlot(i);
     }
+
     for (let i = 0; i < MAX_ENGINES; i++) spawnSlot(i);
     startWatchdog();
   }
