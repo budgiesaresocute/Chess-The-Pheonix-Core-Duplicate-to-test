@@ -8,84 +8,84 @@ import GameOverModal from '../components/chess/GameOverModal';
 import { playMoveSound, playCaptureSound, playCheckSound, playCheckmateSound, playGameStartSound } from '../lib/chessSounds';
 import { createStockfish } from '../engine/stockfishBot';
 const BOTS = [
-{
-id: 'astra',
-name: 'Astra',
-emoji: '🌱',
-label: 'Beginner',
-personality: 'Still learning…',
-useEngine: false,
-depth: 1,
-poolSize: 1,
-inaccuracyRate: 0.6,
-blunderRate: 0.35,
-topMovePool: 0
-},
-{
-id: 'orion',
-name: 'Orion',
-emoji: '⭐',
-label: 'Easy',
-personality: "Let's play!",
-useEngine: true,
-depth: 6,
-poolSize: 3,
-inaccuracyRate: 0.45,
-blunderRate: 0.15,
-topMovePool: 5
-},
-{
-id: 'titanx',
-name: 'TitanX',
-emoji: '⚔️',
-label: 'Intermediate',
-personality: 'Stay sharp.',
-useEngine: true,
-depth: 9,
-poolSize: 4,
-inaccuracyRate: 0.18,
-blunderRate: 0.05,
-topMovePool: 6
-},
-{
-id: 'vortex',
-name: 'Vortex',
-emoji: '🌪️',
-label: 'Advanced',
-personality: 'I see everything.',
-useEngine: true,
-depth: 13,
-poolSize: 7,
-inaccuracyRate: 0.30,
-blunderRate: 0.03,
-topMovePool: 7
-},
-{
-id: 'zenith',
-name: 'Zenith',
-emoji: '👑',
-label: 'Master',
-personality: 'You must be precise.',
-useEngine: true,
-depth: 16,
-poolSize: 6,
-inaccuracyRate: 0.10,
-blunderRate: 0.01,
-topMovePool: 6
-},
-{
-id: 'phoenix',
-name: 'Phoenix Prime',
-emoji: '🔥',
-label: 'Maximum',
-personality: 'This is your end.',
-useEngine: true,
-depth: 20,
-poolSize: 3,
-inaccuracyRate: 0,
-blunderRate: 0,
-topMovePool: 3
-}
+  {
+    id: 'astra',
+    name: 'Astra',
+    emoji: '🌱',
+    label: 'Beginner',
+    personality: 'Still learning…',
+    useEngine: false,
+    depth: 0,
+    poolSize: 0,
+    inaccuracyRate: 0.70,
+    blunderRate: 0.25,
+    topMovePool: 0
+  },
+  {
+    id: 'orion',
+    name: 'Orion',
+    emoji: '⭐',
+    label: 'Easy',
+    personality: "Let's play!",
+    useEngine: true,
+    depth: 10,
+    poolSize: 1,
+    inaccuracyRate: 0.25,
+    blunderRate: 0.15,
+    topMovePool: 0
+  },
+  {
+    id: 'titanx',
+    name: 'TitanX',
+    emoji: '⚔️',
+    label: 'Intermediate',
+    personality: 'Stay sharp.',
+    useEngine: true,
+    depth: 16,
+    poolSize: 1,
+    inaccuracyRate: 0.20,
+    blunderRate: 0.05,
+    topMovePool: 7
+  },
+  {
+    id: 'vortex',
+    name: 'Vortex',
+    emoji: '🌪️',
+    label: 'Advanced',
+    personality: 'I see everything.',
+    useEngine: true,
+    depth: 20,
+    poolSize: 1,
+    inaccuracyRate: 0.15,
+    blunderRate: 0.00,
+    topMovePool: 7
+  },
+  {
+    id: 'zenith',
+    name: 'Zenith',
+    emoji: '👑',
+    label: 'Master',
+    personality: 'You must be precise.',
+    useEngine: true,
+    depth: 24,
+    poolSize: 6,
+    inaccuracyRate: 0.00,
+    blunderRate: 0.00,
+    topMovePool: 0
+  },
+  {
+    id: 'phoenix',
+    name: 'Phoenix Prime',
+    emoji: '🔥',
+    label: 'Maximum',
+    personality: 'This is your end.',
+    useEngine: true,
+    depth: 28,
+    poolSize: 3,
+    inaccuracyRate: 0.00,
+    blunderRate: 0.00,
+    topMovePool: 0
+  }
 ];
 
 // Bot personality system
@@ -127,7 +127,93 @@ const weakPool = scored.slice(Math.floor(scored.length * 0.5));
 const chosen = weakPool[Math.floor(Math.random() * weakPool.length)];
 return chosen.m;
 }
+// Helper: Score moves by piece value (for Astra weak moves)
+function scoreMoves(moves) {
+  const PV = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 100 };
+  const scored = moves.map(m => ({
+    move: m,
+    score: (m.captured ? PV[m.captured] : 0) + Math.random() * 2
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map(s => s.move);
+}
 
+// Weighted selection for deterministic top-N moves
+function selectFromPool(moves, poolSize) {
+  if (!moves.length) return moves[0];
+  const pool = moves.slice(0, Math.min(poolSize, moves.length));
+  
+  const weights = [0.50, 0.25, 0.15, 0.08, 0.01, 0.01];
+  let rand = Math.random();
+  let cumulative = 0;
+  
+  for (let i = 0; i < pool.length; i++) {
+    cumulative += weights[i];
+    if (rand < cumulative) return pool[i];
+  }
+  
+  return pool[0];
+}
+
+// MAIN: Select bot move based on personality
+function getBotMove(game, allMoves, engineMoves, bot) {
+  const rand = Math.random();
+  
+  if (bot.id === 'astra') {
+    if (rand < 0.25) {
+      return allMoves[Math.floor(Math.random() * allMoves.length)];
+    } else if (rand < 0.95) {
+      const sorted = scoreMoves(allMoves);
+      const weakPool = sorted.slice(Math.floor(sorted.length * 0.5));
+      return weakPool[Math.floor(Math.random() * weakPool.length)];
+    } else {
+      return engineMoves[0];
+    }
+  }
+  
+  else if (bot.id === 'orion') {
+    if (rand < 0.15) {
+      return allMoves[Math.floor(Math.random() * allMoves.length)];
+    } else if (rand < 0.40) {
+      return engineMoves[Math.floor(Math.random() * Math.min(7, engineMoves.length))];
+    } else {
+      return engineMoves[0];
+    }
+  }
+  
+  else if (bot.id === 'titanx') {
+    if (rand < 0.05) {
+      return allMoves[Math.floor(Math.random() * allMoves.length)];
+    } else if (rand < 0.25) {
+      return engineMoves[Math.floor(Math.random() * Math.min(7, engineMoves.length))];
+    } else {
+      return engineMoves[0];
+    }
+  }
+  
+  else if (bot.id === 'vortex') {
+    if (rand < 0.15) {
+      return engineMoves[Math.floor(Math.random() * Math.min(7, engineMoves.length))];
+    } else {
+      return engineMoves[0];
+    }
+  }
+  
+  else if (bot.id === 'zenith') {
+    return selectFromPool(engineMoves, 6);
+  }
+  
+  else if (bot.id === 'phoenix') {
+    const pool = engineMoves.slice(0, Math.min(3, engineMoves.length));
+    let r = Math.random();
+    
+    if (r < 0.80) return pool[0];
+    if (r < 0.95) return pool[1] || pool[0];
+    return pool[2] || pool[0];
+  }
+  
+  return engineMoves[0];
+  }
 export default function NormalChess({ timerMode, onBack }) {
 const [selectedBot, setSelectedBot] = useState(null);
 const [game, setGame] = useState(new Chess());
@@ -233,123 +319,53 @@ return newGame;
 const triggerBot = useCallback(async (fen, bot) => {
   if (botLock.current) return;
   botLock.current = true;
-
   setIsThinking(true);
-  setThinkTime(0);
 
-  thinkTimerRef.current = setInterval(() => {
-    setThinkTime(t => t + 1);
-  }, 1000);
+  const g = new Chess(fen);
 
   try {
-    // ================= ASTRA =================
-    if (!bot.useEngine || !engineRef.current) {
-      await new Promise(r => setTimeout(r, 600));
-      const move = getSimpleMove(fen);
-      if (move) applyBotMove(move.from, move.to, move.promotion);
-      return;
-    }
-
-    // ================= GET ENGINE MOVES =================
-    let pool = await engineRef.current.getBestMoveFromPool(
-      fen,
-      bot.depth,
-      7
-    );
-
-    // 🔥 CRITICAL FIX: force array
-    if (typeof pool === "string") pool = [pool];
-    if (!Array.isArray(pool)) pool = [];
-
-    // DEBUG (you can remove later)
-    console.log("ENGINE POOL:", pool);
-
-    if (!pool.length) {
-      const fallback = getSimpleMove(fen);
-      if (fallback) applyBotMove(fallback.from, fallback.to, fallback.promotion);
-      return;
-    }
-
-    // ================= HELPERS =================
-    const pickTop = (n) =>
-      pool[Math.floor(Math.random() * Math.min(n, pool.length))];
-
-    const randomMove = () => {
-      const temp = new Chess(fen);
-      const moves = temp.moves({ verbose: true });
-      return moves[Math.floor(Math.random() * moves.length)];
-    };
-
     let move = null;
-    const roll = Math.random();
 
-    // ================= PHOENIX =================
-    if (bot.id === "phoenix") {
-      move = pickTop(3); // ONLY top 3
-    }
-
-    // ================= ZENITH =================
-    else if (bot.id === "zenith") {
-      move = pickTop(6);
-    }
-
-    // ================= VORTEX =================
-    else if (bot.id === "vortex") {
-      if (roll < 0.15) {
-        const m = randomMove();
-        if (m) applyBotMove(m.from, m.to, m.promotion);
-        return;
-      }
-      move = pickTop(7);
-    }
-
-    // ================= TITANX =================
-    else if (bot.id === "titanx") {
-      if (roll < 0.05) {
-        const m = randomMove();
-        if (m) applyBotMove(m.from, m.to, m.promotion);
-        return;
-      }
-      move = roll < 0.25 ? pickTop(5) : pool[0];
-    }
-
-    // ================= ORION =================
-    else if (bot.id === "orion") {
-      if (roll < 0.15) {
-        const m = randomMove();
-        if (m) applyBotMove(m.from, m.to, m.promotion);
-        return;
-      }
-      move = roll < 0.40 ? pickTop(5) : pool[0];
-    }
-
-    // ================= DEFAULT =================
-    else {
-      move = pool[0];
-    }
-
-    // ================= APPLY MOVE =================
-    if (move) {
-      applyBotMove(
-        move.slice(0, 2),
-        move.slice(2, 4),
-        move[4] || undefined
+    if (bot.id === 'astra') {
+      const allMoves = g.moves({ verbose: true });
+      move = getBotMove(g, allMoves, allMoves, bot);
+    } else {
+      const allMoves = g.moves({ verbose: true });
+      const engineMovesList = await engineRef.current.getBestMoveFromPool(
+        fen,
+        bot.depth,
+        Math.max(7, bot.topMovePool)
       );
+
+      if (!engineMovesList || !engineMovesList.length) {
+        move = allMoves[Math.floor(Math.random() * allMoves.length)];
+      } else {
+        const engineMovesObjects = engineMovesList
+          .map(m => allMoves.find(am => am.san === m || `${am.from}${am.to}` === m))
+          .filter(Boolean);
+
+        move = getBotMove(g, allMoves, engineMovesObjects, bot);
+      }
     }
 
+    if (!move) {
+      const allMoves = g.moves({ verbose: true });
+      move = allMoves[Math.floor(Math.random() * allMoves.length)];
+    }
+
+    const thinkTime = bot.depth === 0 ? 1000 : (bot.depth * 300) + 1000;
+    await new Promise(resolve => setTimeout(resolve, thinkTime));
+
+    setIsThinking(false);
+    botLock.current = false;
+
+    applyBotMove(move.from, move.to, move.promotion);
   } catch (e) {
-    console.error("Bot error:", e);
-    const fallback = getSimpleMove(fen);
-    if (fallback) applyBotMove(fallback.from, fallback.to, fallback.promotion);
-  } finally {
-    // 🔥 CRITICAL FIX: ALWAYS RUN
-    clearInterval(thinkTimerRef.current);
-    setThinkTime(0);
+    console.error('Bot error:', e);
     setIsThinking(false);
     botLock.current = false;
   }
-
-}, [applyBotMove]);
+}, [selectedBot, engineRef, applyBotMove]);
   
 const handleSquareClick = useCallback((square) => {
 if (gameOver || isThinking || promotionMove || resignConfirm) return;
