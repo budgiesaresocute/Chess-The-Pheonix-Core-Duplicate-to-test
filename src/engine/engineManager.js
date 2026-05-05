@@ -114,4 +114,4 @@ export function getBestMove(fen, depth = 10, mpv = 1) {
       fallback.getBestMove(fen, depth, mpv).then(resolve);
     }
   });
-                      }
+}
