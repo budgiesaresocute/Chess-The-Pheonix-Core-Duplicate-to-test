@@ -20,11 +20,11 @@ export function initEngine() {
 
 function getThinkTime(depth) {
   const depthTimeMap = {
-    12: 3000,
-    18: 10000,
-    22: 18000,
-    26: 28000,
-    30: 40000
+    18: 6000,
+    24: 18000,
+    28: 30000,
+    32: 45000,
+    36: 70000
   };
   
   return depthTimeMap[depth] || 5000;
@@ -45,7 +45,7 @@ export function getBestMoveFromPool(fen, depth = 10, mpv = 7) {
 
       const moves = await fallback.getBestMoveFromPool(fen, depth, mpv);
       resolve(moves || []);
-    }, thinkTime + 2000);
+    }, thinkTime + 5000);
 
     if (cluster) {
       cluster.onmessage = (e) => {
@@ -88,7 +88,7 @@ export function getBestMove(fen, depth = 10, mpv = 1) {
 
       const move = await fallback.getBestMove(fen, depth, mpv);
       resolve(move);
-    }, thinkTime + 2000);
+    }, thinkTime + 5000);
 
     if (cluster) {
       cluster.onmessage = (e) => {
@@ -114,4 +114,4 @@ export function getBestMove(fen, depth = 10, mpv = 1) {
       fallback.getBestMove(fen, depth, mpv).then(resolve);
     }
   });
-}
+                      }
