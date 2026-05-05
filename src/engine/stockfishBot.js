@@ -1,5 +1,6 @@
 // =====================================
-// Phoenix Stockfish Bot (v11.2-lite FINAL)
+// Phoenix Stockfish Bot (CLEAN v12 FINAL)
+// Single-engine • Stable • MultiPV ready
 // =====================================
 
 let sf = null;
@@ -11,8 +12,8 @@ let pending = null;
 let topMoves = [];
 let initPromise = null;
 
-const MAX_PV = 5;
-const TIMEOUT = 9000;
+const MAX_PV = 7;        // needed for vortex
+const TIMEOUT = 12000;   // stable timeout
 
 // ================= INIT =================
 function loadStockfish() {
@@ -62,7 +63,7 @@ function loadStockfish() {
   return initPromise;
 }
 
-// ================= MESSAGE =================
+// ================= MESSAGE HANDLER =================
 function handleMessage(line) {
   if (!line || failed) return;
 
@@ -71,26 +72,29 @@ function handleMessage(line) {
     return;
   }
 
+  // ================= MULTIPV TRACK =================
   if (line.startsWith("info") && line.includes(" pv ")) {
-    const idx = line.indexOf(" pv ");
-    const pv = line.slice(idx + 4).trim().split(/\s+/);
+    const pvIndex = line.indexOf(" pv ");
+    const pv = line.slice(pvIndex + 4).trim().split(/\s+/);
 
-    const mpv = line.match(/multipv (\d+)/);
-    const depth = line.match(/ depth (\d+)/);
+    const mpvMatch = line.match(/multipv (\d+)/);
+    const depthMatch = line.match(/ depth (\d+)/);
 
-    const id = mpv ? +mpv[1] : 1;
-    const d = depth ? +depth[1] : 0;
+    const id = mpvMatch ? +mpvMatch[1] : 1;
+    const depth = depthMatch ? +depthMatch[1] : 0;
 
     const prev = topMoves[id];
 
-    if (!prev || d > prev.depth) {
+    // keep best depth per line
+    if (!prev || depth > prev.depth) {
       topMoves[id] = {
         move: pv[0],
-        depth: d
+        depth
       };
     }
   }
 
+  // ================= FINAL MOVE =================
   if (line.startsWith("bestmove")) {
     const best = line.split(" ")[1];
 
@@ -100,7 +104,12 @@ function handleMessage(line) {
         .sort((a, b) => b.depth - a.depth)
         .map(m => m.move);
 
-      pending.resolve(moves.length ? moves : [best]);
+      pending.resolve(
+        moves.length
+          ? moves
+          : (best && best !== "(none)" ? [best] : [])
+      );
+
       pending = null;
     }
 
@@ -109,7 +118,7 @@ function handleMessage(line) {
 }
 
 // ================= SEARCH =================
-function search(fen, depth, mpv = 1) {
+function search(fen, depth = 10, mpv = 3) {
   return new Promise(async (resolve) => {
     const ready = await loadStockfish();
     if (!ready || !sf) return resolve([]);
@@ -119,14 +128,29 @@ function search(fen, depth, mpv = 1) {
 
     topMoves = [];
 
-    pending = { session: mySession, resolve };
+    pending = {
+      session: mySession,
+      resolve
+    };
 
-    sf.postMessage("stop");
-    sf.postMessage("ucinewgame");
-    sf.postMessage(`setoption name MultiPV value ${Math.min(mpv, MAX_PV)}`);
-    sf.postMessage(`position fen ${fen}`);
-    sf.postMessage(`go depth ${depth}`);
+    try {
+      sf.postMessage("stop");
+      sf.postMessage("ucinewgame");
 
+      // clamp mpv safely
+      const pv = Math.min(Math.max(1, mpv), MAX_PV);
+
+      sf.postMessage(`setoption name MultiPV value ${pv}`);
+      sf.postMessage(`position fen ${fen}`);
+
+      // depth search (stable + consistent)
+      sf.postMessage(`go depth ${depth}`);
+    } catch {
+      resolve([]);
+      return;
+    }
+
+    // ================= SAFETY TIMEOUT =================
     setTimeout(() => {
       if (pending?.session === mySession) {
         pending.resolve([]);
@@ -141,23 +165,26 @@ export function createStockfish() {
   loadStockfish();
 
   return {
-    getBestMove: async (fen, depth = 10, mpv = 1) => {
-      const moves = await search(fen, depth, mpv);
+    // 🔥 BEST MOVE ONLY (for Phoenix if needed)
+    getBestMove: async (fen, depth = 10) => {
+      const moves = await search(fen, depth, 1);
       return moves.length ? moves[0] : null;
     },
 
+    // 🔥 MOVE POOL (for all bots)
     getBestMoveFromPool: async (fen, depth = 10, mpv = 3) => {
       const moves = await search(fen, depth, mpv);
-      return moves.length
-        ? moves[Math.floor(Math.random() * moves.length)]
-        : null;
+      return moves;
     },
 
+    // stop current search cleanly
     stop: () => {
       session++;
       pending = null;
       topMoves = [];
-      sf?.postMessage("stop");
+      try {
+        sf?.postMessage("stop");
+      } catch {}
     }
   };
-}
+      }
