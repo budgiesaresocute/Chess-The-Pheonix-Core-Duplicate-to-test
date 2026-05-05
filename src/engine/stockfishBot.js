@@ -12,9 +12,8 @@ let topMoves = [];
 let initPromise = null;
 
 const MAX_PV = 7;
-const TIMEOUT = 40000;  // 40 seconds instead of 9
+const TIMEOUT = 40000;
 
-// ================= INIT =================
 function loadStockfish() {
   if (initPromise) return initPromise;
 
@@ -62,7 +61,6 @@ function loadStockfish() {
   return initPromise;
 }
 
-// ================= MESSAGE =================
 function handleMessage(line) {
   if (!line || failed) return;
 
@@ -108,7 +106,6 @@ function handleMessage(line) {
   }
 }
 
-// ================= SEARCH =================
 function search(fen, depth, mpv = 1) {
   return new Promise(async (resolve) => {
     const ready = await loadStockfish();
@@ -136,7 +133,6 @@ function search(fen, depth, mpv = 1) {
   });
 }
 
-// ================= API =================
 export function createStockfish() {
   loadStockfish();
 
@@ -158,4 +154,4 @@ export function createStockfish() {
       sf?.postMessage("stop");
     }
   };
-      }
+}
