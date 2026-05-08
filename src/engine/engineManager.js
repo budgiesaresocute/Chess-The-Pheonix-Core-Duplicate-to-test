@@ -4,12 +4,23 @@ let cluster = null;
 let fallback = null;
 
 export function initEngine() {
+
   if (!cluster) {
     try {
+
       cluster = new Worker("/stockfish-worker.js");
-      cluster.postMessage({ cmd: "init" });
+
+      cluster.postMessage({
+        cmd: "init"
+      });
+
+      console.log("✅ Cluster worker initialized");
+
     } catch (e) {
-      console.log("⚠️ Cluster worker not available, using fallback");
+
+      console.log(
+        "⚠️ Worker unavailable, using fallback"
+      );
     }
   }
 
@@ -18,111 +29,190 @@ export function initEngine() {
   }
 }
 
-// ============================================
-// Optimized thinking time mapping for Stockfish 18
-// ============================================
 function getThinkTime(depth) {
-  const depthTimeMap = {
+
+  const depthMap = {
+    8: 300,
     10: 500,
+    14: 900,
     18: 1500,
-    22: 2500,
+    20: 2200,
     24: 3500,
     28: 5000,
-    30: 4000,
-    32: 6000,
-    36: 8000,
-    40: 10000,
-    44: 12000,
+    32: 7000,
+    35: 9000,
+    38: 12000,
   };
-  
-  return depthTimeMap[depth] || (500 + depth * 100);
+
+  return depthMap[depth] || (500 + depth * 120);
 }
 
-export function getBestMoveFromPool(fen, depth = 10, mpv = 7) {
+function runClusterSearch({
+  fen,
+  depth,
+  mpv
+}) {
+
   return new Promise((resolve) => {
-    let done = false;
-    let fallbackTriggered = false;
 
-    const thinkTime = getThinkTime(depth);
-    console.log(`📊 Thinking for ${thinkTime}ms at depth ${depth}`);
+    if (!cluster) {
+      resolve(null);
+      return;
+    }
 
-    const timeout = setTimeout(async () => {
-      if (done || fallbackTriggered) return;
+    const requestId =
+      `${Date.now()}-${Math.random()}`;
 
-      fallbackTriggered = true;
-      done = true;
+    const timeout = setTimeout(() => {
 
-      console.log('⏱️ Timeout reached, using fallback engine');
-      const moves = await fallback.getBestMoveFromPool(fen, depth, mpv);
-      resolve(moves || []);
-    }, thinkTime + 5000);
+      cluster.removeEventListener(
+        "message",
+        handler
+      );
 
-    if (cluster) {
-      cluster.onmessage = (e) => {
-        if (done) return;
+      resolve(null);
 
-        if (e.data?.type === "result") {
-          fallbackTriggered = true;
-          done = true;
+    }, getThinkTime(depth) + 5000);
 
-          clearTimeout(timeout);
-          console.log(`✅ Got ${e.data.moves?.length || 0} moves from cluster`);
-          resolve(e.data.moves || []);
-        }
-      };
+    const handler = (e) => {
 
-      cluster.postMessage({
-        cmd: "search",
+      if (
+        e.data?.type !== "result" ||
+        e.data?.requestId !== requestId
+      ) {
+        return;
+      }
+
+      clearTimeout(timeout);
+
+      cluster.removeEventListener(
+        "message",
+        handler
+      );
+
+      resolve(e.data.moves || []);
+    };
+
+    cluster.addEventListener(
+      "message",
+      handler
+    );
+
+    cluster.postMessage({
+      cmd: "search",
+      requestId,
+      fen,
+      depth,
+      mpv
+    });
+  });
+}
+
+export async function getBestMoveFromPool(
+  fen,
+  depth = 10,
+  mpv = 7
+) {
+
+  initEngine();
+
+  try {
+
+    const clusterMoves =
+      await runClusterSearch({
         fen,
         depth,
         mpv
       });
-    } else {
-      clearTimeout(timeout);
-      fallback.getBestMoveFromPool(fen, depth, mpv).then(resolve);
+
+    if (
+      clusterMoves &&
+      clusterMoves.length
+    ) {
+
+      console.log(
+        `✅ Cluster returned ${clusterMoves.length} moves`
+      );
+
+      return clusterMoves;
     }
-  });
+
+    console.log(
+      "⚠️ Falling back to local engine"
+    );
+
+    return await fallback.getBestMoveFromPool(
+      fen,
+      depth,
+      mpv,
+      getThinkTime(depth)
+    );
+
+  } catch (e) {
+
+    console.error(
+      "❌ Engine manager error",
+      e
+    );
+
+    return await fallback.getBestMoveFromPool(
+      fen,
+      depth,
+      mpv,
+      getThinkTime(depth)
+    );
+  }
 }
 
-export function getBestMove(fen, depth = 10, mpv = 1) {
-  return new Promise((resolve) => {
-    let done = false;
-    let fallbackTriggered = false;
+export async function getBestMove(
+  fen,
+  depth = 10,
+  mpv = 1
+) {
 
-    const thinkTime = getThinkTime(depth);
+  const moves =
+    await getBestMoveFromPool(
+      fen,
+      depth,
+      mpv
+    );
 
-    const timeout = setTimeout(async () => {
-      if (done || fallbackTriggered) return;
+  return moves?.[0] || null;
+}
 
-      fallbackTriggered = true;
-      done = true;
+export function stopEngine() {
 
-      const move = await fallback.getBestMove(fen, depth, mpv);
-      resolve(move);
-    }, thinkTime + 5000);
+  try {
+    cluster?.postMessage({
+      cmd: "stop"
+    });
+  } catch {}
 
-    if (cluster) {
-      cluster.onmessage = (e) => {
-        if (done) return;
+  fallback?.stop?.();
+}
 
-        if (e.data?.type === "result") {
-          fallbackTriggered = true;
-          done = true;
+export function newGame() {
 
-          clearTimeout(timeout);
-          resolve(e.data.moves?.[0] || null);
-        }
-      };
+  try {
+    cluster?.postMessage({
+      cmd: "newgame"
+    });
+  } catch {}
 
-      cluster.postMessage({
-        cmd: "search",
-        fen,
-        depth,
-        mpv
-      });
-    } else {
-      clearTimeout(timeout);
-      fallback.getBestMove(fen, depth, mpv).then(resolve);
-    }
-  });
+  fallback?.newGame?.();
+}
+
+export function destroyEngine() {
+
+  stopEngine();
+
+  try {
+    cluster?.terminate?.();
+  } catch {}
+
+  cluster = null;
+
+  fallback?.terminate?.();
+
+  fallback = null;
 }
