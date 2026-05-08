@@ -1,5 +1,6 @@
 // =====================================
-// Phoenix Stockfish Bot (v11.2-lite ENHANCED)
+// Phoenix Stockfish Bot (v18.0 ENHANCED)
+// Optimized for deep analysis with Stockfish 18
 // =====================================
 let sf = null;
 let isReady = false;
@@ -11,12 +12,13 @@ let topMoves = [];
 let initPromise = null;
 
 const MAX_PV = 7;
-const TIMEOUT = 60000;
+const TIMEOUT = 90000; // Extended timeout for deeper analysis
 
 function loadStockfish() {
   if (initPromise) return initPromise;
 
   initPromise = new Promise((resolve) => {
+    // Prioritize Stockfish 18, fall back to 17
     const sources = [
       "https://cdn.jsdelivr.net/npm/stockfish@18.0.0/src/stockfish-nnue-16-single.js",
       "https://unpkg.com/stockfish@18.0.0/src/stockfish-nnue-16-single.js",
@@ -28,13 +30,13 @@ function loadStockfish() {
     const tryNext = (i = 0) => {
       if (i >= sources.length) {
         failed = true;
-        console.error('Failed to load Stockfish from all sources');
+        console.error('❌ Failed to load Stockfish from all sources');
         resolve(false);
         return;
       }
 
       try {
-        console.log(`Loading Stockfish from: ${sources[i]}`);
+        console.log(`🔄 Loading Stockfish from: ${sources[i]}`);
         importScripts(sources[i]);
 
         sf =
@@ -45,7 +47,7 @@ function loadStockfish() {
             : null;
 
         if (!sf) {
-          console.log(`Source ${i} failed, trying next...`);
+          console.log(`⚠️ Source ${i} failed, trying next...`);
           return tryNext(i + 1);
         }
 
@@ -59,7 +61,7 @@ function loadStockfish() {
 
         setTimeout(() => resolve(true), 3000);
       } catch (e) {
-        console.log(`Error loading source ${i}:`, e.message);
+        console.log(`⚠️ Error loading source ${i}:`, e.message);
         tryNext(i + 1);
       }
     };
@@ -78,33 +80,43 @@ function handleMessage(line) {
     return;
   }
 
+  // Parse info lines with principal variations
   if (line.startsWith("info") && line.includes(" pv ")) {
     const idx = line.indexOf(" pv ");
     const pv = line.slice(idx + 4).trim().split(/\s+/);
 
     const mpv = line.match(/multipv (\d+)/);
     const depth = line.match(/ depth (\d+)/);
+    const seldepth = line.match(/ seldepth (\d+)/);
+    const score = line.match(/ score (cp|mate) (-?\d+)/);
 
     const id = mpv ? +mpv[1] : 1;
     const d = depth ? +depth[1] : 0;
+    const sd = seldepth ? +seldepth[1] : d;
 
     const prev = topMoves[id];
 
-    if (!prev || d > prev.depth) {
+    if (!prev || d > prev.depth || (d === prev.depth && sd > prev.seldepth)) {
       topMoves[id] = {
         move: pv[0],
-        depth: d
+        depth: d,
+        seldepth: sd,
+        score: score ? score[0] : null
       };
     }
   }
 
+  // When search completes
   if (line.startsWith("bestmove")) {
     const best = line.split(" ")[1];
 
     if (pending?.session === session) {
       const moves = Object.values(topMoves)
         .filter(Boolean)
-        .sort((a, b) => b.depth - a.depth)
+        .sort((a, b) => {
+          if (b.depth !== a.depth) return b.depth - a.depth;
+          return b.seldepth - a.seldepth;
+        })
         .map(m => m.move);
 
       pending.resolve(moves.length ? moves : [best]);
@@ -119,7 +131,7 @@ function search(fen, depth, mpv = 1) {
   return new Promise(async (resolve) => {
     const ready = await loadStockfish();
     if (!ready || !sf) {
-      console.error('Stockfish not ready');
+      console.error('❌ Stockfish not ready');
       return resolve([]);
     }
 
@@ -127,19 +139,25 @@ function search(fen, depth, mpv = 1) {
     const mySession = session;
 
     topMoves = [];
-
     pending = { session: mySession, resolve };
 
     sf.postMessage("stop");
     sf.postMessage("ucinewgame");
-    sf.postMessage(`setoption name MultiPV value ${Math.min(mpv, MAX_PV)}`);
+    
+    const mpvCount = Math.min(mpv, MAX_PV);
+    sf.postMessage(`setoption name MultiPV value ${mpvCount}`);
     sf.postMessage(`position fen ${fen}`);
+    
+    console.log(`🔍 Starting search: depth=${depth}, mpv=${mpvCount}`);
     sf.postMessage(`go depth ${depth}`);
 
     setTimeout(() => {
       if (pending?.session === mySession) {
-        console.log('Search timeout, returning current best moves');
-        pending.resolve([]);
+        console.log('⏱️ Search timeout, returning current best moves');
+        pending.resolve(Object.values(topMoves)
+          .filter(Boolean)
+          .map(m => m.move)
+        );
         pending = null;
       }
     }, TIMEOUT);
@@ -165,6 +183,12 @@ export function createStockfish() {
       pending = null;
       topMoves = [];
       sf?.postMessage("stop");
+    },
+
+    terminate: () => {
+      sf?.postMessage("stop");
+      sf = null;
+      isReady = false;
     }
   };
-        }
+}
