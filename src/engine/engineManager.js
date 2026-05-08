@@ -9,7 +9,7 @@ export function initEngine() {
       cluster = new Worker("/stockfish-worker.js");
       cluster.postMessage({ cmd: "init" });
     } catch (e) {
-      console.log("Cluster worker not available, using fallback");
+      console.log("⚠️ Cluster worker not available, using fallback");
     }
   }
 
@@ -18,16 +18,24 @@ export function initEngine() {
   }
 }
 
+// ============================================
+// Optimized thinking time mapping for Stockfish 18
+// ============================================
 function getThinkTime(depth) {
   const depthTimeMap = {
-    18: 6000,
-    24: 18000,
-    28: 30000,
-    32: 45000,
-    36: 70000
+    10: 500,
+    18: 1500,
+    22: 2500,
+    24: 3500,
+    28: 5000,
+    30: 4000,
+    32: 6000,
+    36: 8000,
+    40: 10000,
+    44: 12000,
   };
   
-  return depthTimeMap[depth] || 5000;
+  return depthTimeMap[depth] || (500 + depth * 100);
 }
 
 export function getBestMoveFromPool(fen, depth = 10, mpv = 7) {
@@ -36,6 +44,7 @@ export function getBestMoveFromPool(fen, depth = 10, mpv = 7) {
     let fallbackTriggered = false;
 
     const thinkTime = getThinkTime(depth);
+    console.log(`📊 Thinking for ${thinkTime}ms at depth ${depth}`);
 
     const timeout = setTimeout(async () => {
       if (done || fallbackTriggered) return;
@@ -43,6 +52,7 @@ export function getBestMoveFromPool(fen, depth = 10, mpv = 7) {
       fallbackTriggered = true;
       done = true;
 
+      console.log('⏱️ Timeout reached, using fallback engine');
       const moves = await fallback.getBestMoveFromPool(fen, depth, mpv);
       resolve(moves || []);
     }, thinkTime + 5000);
@@ -56,6 +66,7 @@ export function getBestMoveFromPool(fen, depth = 10, mpv = 7) {
           done = true;
 
           clearTimeout(timeout);
+          console.log(`✅ Got ${e.data.moves?.length || 0} moves from cluster`);
           resolve(e.data.moves || []);
         }
       };
