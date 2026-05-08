@@ -91,6 +91,7 @@ export default function NormalChess({ timerMode, onBack }) {
   const mountedRef = useRef(true);
   const gameRef = useRef(initialGame);
   const engineRef = useRef(null);
+  const engineBusyRef = useRef(false); // FIX: Engine concurrency guard
   const botLock = useRef(false);
   const timerRef = useRef(null);
   const thinkRef = useRef(null);
@@ -105,7 +106,6 @@ export default function NormalChess({ timerMode, onBack }) {
   const blackTimeRef = useRef(0);
   const applySideEffectsRef = useRef(null);
 
-  // --- FIX: Action Queue for Serialization ---
   const actionQueue = useRef(Promise.resolve());
   const enqueue = (fn) => {
     actionQueue.current = actionQueue.current.then(fn).catch(() => {});
@@ -123,7 +123,6 @@ export default function NormalChess({ timerMode, onBack }) {
   useEffect(() => { blackTimeRef.current = blackTime; }, [blackTime]);
   useEffect(() => { selectedBotRef.current = selectedBot; }, [selectedBot]);
 
-  // FIX: Restore automatic sync for Ref and State
   useEffect(() => {
     gameOverRef.current = !!gameOver;
   }, [gameOver]);
@@ -143,6 +142,7 @@ export default function NormalChess({ timerMode, onBack }) {
     if (botTimeoutRef.current) { clearTimeout(botTimeoutRef.current); botTimeoutRef.current = null; }
     if (premoveTimeoutRef.current) { clearTimeout(premoveTimeoutRef.current); premoveTimeoutRef.current = null; }
     botLock.current = false;
+    engineBusyRef.current = false;
     if (mountedRef.current) {
       setIsThinking(false);
       setThinkTime("0.0");
@@ -164,7 +164,6 @@ export default function NormalChess({ timerMode, onBack }) {
   }, []);
 
   const applySideEffectsAndState = useCallback((newGame, moveResult, isPremove = false, callId) => {
-    // FIX: Verify callId matches current analysisId to prevent zombie microtasks
     if (gameOverRef.current || (callId !== undefined && callId !== analysisIdRef.current)) return;
 
     const isGameOver = newGame.isGameOver();
@@ -236,7 +235,13 @@ export default function NormalChess({ timerMode, onBack }) {
 
   const triggerBot = useCallback(async (fen, bot) => {
     const currentEngine = engineRef.current;
-    if (botLock.current || gameOverRef.current || !currentEngine) return;
+    // FIX: Integrated engineBusyRef guard
+    if (
+      botLock.current ||
+      engineBusyRef.current ||
+      gameOverRef.current ||
+      !currentEngine
+    ) return;
 
     const myId = ++analysisIdRef.current;
     botLock.current = true;
@@ -257,6 +262,7 @@ export default function NormalChess({ timerMode, onBack }) {
       const allMoves = g.moves({ verbose: true });
       if (!allMoves.length) return;
 
+      engineBusyRef.current = true; // FIX: Lock engine before async race
       const rawPool = await Promise.race([
         currentEngine.getBestMoveFromPool(fen, bot.depth, bot.topMovePool, bot.searchTime),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Engine timeout')), 15000))
@@ -283,7 +289,6 @@ export default function NormalChess({ timerMode, onBack }) {
         } else if (bot.id === 'titanx') {
           finalMove = r < 0.08 ? safeMove(10) : r < 0.25 ? safeMove(4) : engineMoves[0];
         } else if (bot.id === 'vortex') {
-          // FIX: Re-add personality logic
           finalMove = r < 0.20 ? safeMove(4) : engineMoves[0];
         } else if (bot.id === 'zenith') {
           finalMove = r < 0.85 ? safeMove(1) : safeMove(4);
@@ -311,6 +316,7 @@ export default function NormalChess({ timerMode, onBack }) {
         if (r) enqueue(() => applySideEffectsRef.current(n, r, false, myId));
       }
     } finally {
+      engineBusyRef.current = false; // FIX: Release engine lock
       if (myId === analysisIdRef.current && mountedRef.current) {
         if (thinkRef.current) { clearInterval(thinkRef.current); thinkRef.current = null; }
         setIsThinking(false); setThinkTime("0.0"); botLock.current = false;
@@ -330,7 +336,6 @@ export default function NormalChess({ timerMode, onBack }) {
 
   const initializeGame = useCallback((color, botToPlay) => {
     analysisIdRef.current++;
-    // FIX: Flush worker memory on restart
     const oldEngine = engineRef.current;
     try { oldEngine?.terminate?.(); } catch {}
     engineRef.current = createStockfish();
@@ -374,7 +379,6 @@ export default function NormalChess({ timerMode, onBack }) {
     const curr = gameRef.current;
     if (curr.turn() !== playerColor) {
       if (selectedSquare) {
-        // FIX: Genuine pseudo-legal premoves
         const piece = curr.get(selectedSquare);
         if (piece && piece.color === playerColor) {
           setPremoveMove({ from: selectedSquare, to: square, promotion: 'q' });
@@ -421,7 +425,6 @@ export default function NormalChess({ timerMode, onBack }) {
   useEffect(() => {
     if (!timerRunning || gameOver) return;
     lastTickRef.current = Date.now();
-    // FIX: Clear existing interval before starting new one
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
       const elapsed = Date.now() - lastTickRef.current;
