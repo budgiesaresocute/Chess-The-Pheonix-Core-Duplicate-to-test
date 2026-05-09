@@ -1019,4 +1019,83 @@ ${result.pv}`
             ) => (
               <div
                 key={index}
-                style={
+                style={{
+                  marginTop: 10,
+                }}
+              >
+                💎 Move{' '}
+                {
+                  move.turn
+                }
+                :{' '}
+                {
+                  move.move
+                }
+              </div>
+            )
+          )}
+        </div>
+
+        {/* BLUNDERS */}
+
+        <div
+          style={{
+            backgroundColor:
+              '#1c1c1c',
+            padding: 20,
+            borderRadius: 12,
+          }}
+        >
+          <h2>
+            💥 Blunders
+          </h2>
+
+          {analysis
+            .blunders
+            .length === 0 && (
+            <div
+              style={{
+                color:
+                  '#888',
+                marginTop: 10,
+              }}
+            >
+              No blunders
+            </div>
+          )}
+
+          {analysis.blunders.map(
+            (
+              move,
+              index
+            ) => (
+              <div
+                key={index}
+                style={{
+                  marginTop: 10,
+                  cursor:
+                    'pointer',
+                }}
+                onClick={() =>
+                  setCurrentMoveIndex(
+                    move.turn -
+                      1
+                  )
+                }
+              >
+                💥 Move{' '}
+                {
+                  move.turn
+                }
+                :{' '}
+                {
+                  move.move
+                }
+              </div>
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  );
+              }
