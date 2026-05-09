@@ -28,9 +28,6 @@ export default function AnalysisMode({
   const [loading, setLoading] =
     useState(false);
 
-  const [loadingText, setLoadingText] =
-    useState('');
-
   const [gameState, setGameState] =
     useState('upload');
 
@@ -48,6 +45,9 @@ export default function AnalysisMode({
   const [selectedCoach, setSelectedCoach] =
     useState('FRIENDLY');
 
+  const [gameNotes, setGameNotes] =
+    useState({});
+
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -56,6 +56,11 @@ export default function AnalysisMode({
 
   async function handlePgnUpload() {
     try {
+      if (!pgn.trim()) {
+        alert('Please paste a PGN');
+        return;
+      }
+
       setLoading(true);
 
       const parsed = parsePgn(pgn);
@@ -69,56 +74,37 @@ export default function AnalysisMode({
         i < parsed.history.length;
         i++
       ) {
-        setLoadingText(
-          `Analyzing move ${
-            i + 1
-          } / ${parsed.history.length}`
-        );
-
         const move =
           parsed.history[i];
 
-        // =========================
-        // POSITION BEFORE MOVE
-        // =========================
-
+        // Position BEFORE move
         const beforeFen =
           chess.fen();
 
+        // Evaluate BEFORE move
         const beforeEval =
           await evaluatePosition(
             beforeFen,
             10
           );
 
-        // =========================
-        // PLAY ACTUAL MOVE
-        // =========================
+        // Get legal moves count
+        const legalMoves =
+          chess.moves().length;
 
+        // Play move
         chess.move(move);
 
-        // =========================
-        // POSITION AFTER MOVE
-        // =========================
-
+        // Position AFTER move
         const afterFen =
           chess.fen();
 
+        // Evaluate AFTER move
         const afterEval =
           await evaluatePosition(
             afterFen,
             10
           );
-
-        // =========================
-        // EVAL LOSS
-        // =========================
-
-        const bestEval =
-          beforeEval.eval;
-
-        const playedEval =
-          afterEval.eval;
 
         analyzedMoves.push({
           ...move,
@@ -129,38 +115,43 @@ export default function AnalysisMode({
               : analyzedMoves[i - 1]
                   .playedEval,
 
-          bestEval,
-          playedEval,
+          bestEval:
+            beforeEval.eval,
+
+          playedEval:
+            afterEval.eval,
 
           bestMove:
             beforeEval.bestMove,
 
-          pv:
-            beforeEval.pv,
+          pv: beforeEval.pv,
 
-          mate:
-            afterEval.mate,
+          mate: afterEval.mate,
 
-          legalMoves:
-            chess.moves().length,
+          legalMoves,
         });
       }
 
-      // =========================
-      // FINAL GAME ANALYSIS
-      // =========================
-
       const analysisResult =
-        analyzeGame(analyzedMoves);
+        analyzeGame(
+          analyzedMoves
+        );
 
       setUploadedGame({
         ...parsed,
-        moveHistory: analyzedMoves,
+        moveHistory:
+          analyzedMoves,
       });
 
-      setAnalysis(analysisResult);
+      setAnalysis(
+        analysisResult
+      );
 
-      setGameState('analysis');
+      setCurrentMoveIndex(0);
+
+      setGameState(
+        'analysis'
+      );
     } catch (err) {
       console.error(err);
 
@@ -170,30 +161,35 @@ export default function AnalysisMode({
       );
     } finally {
       setLoading(false);
-      setLoadingText('');
     }
   }
-
-  // =====================================
-  // UPLOAD SCREEN
-  // =====================================
 
   if (gameState === 'upload') {
     return (
       <div
         style={{
           padding: 30,
-          backgroundColor: '#111',
+          backgroundColor:
+            '#111',
           color: 'white',
-          minHeight: '100vh',
+          minHeight:
+            '100vh',
+          maxWidth: 1200,
+          margin: '0 auto',
         }}
       >
         <button
           onClick={onBack}
           style={{
             marginBottom: 20,
-            padding: '10px 16px',
+            padding:
+              '10px 16px',
+            borderRadius: 8,
+            border: 'none',
             cursor: 'pointer',
+            backgroundColor:
+              '#333',
+            color: 'white',
           }}
         >
           ← Back
@@ -201,63 +197,83 @@ export default function AnalysisMode({
 
         <h1
           style={{
-            fontSize: 40,
+            fontSize: 42,
             marginBottom: 10,
           }}
         >
-          📊 Professional Analysis
+          📊 Professional
+          Chess Analysis
         </h1>
 
         <p
           style={{
             color: '#aaa',
-            marginBottom: 20,
+            marginBottom: 25,
           }}
         >
-          Upload a PGN and analyze
-          with Stockfish
+          Upload or paste
+          PGN for full
+          engine analysis
         </p>
 
         <textarea
           value={pgn}
           onChange={(e) =>
-            setPgn(e.target.value)
+            setPgn(
+              e.target.value
+            )
           }
-          placeholder='Paste PGN here...'
+          placeholder={`[Event "Game"]
+
+1. e4 e5
+2. Nf3 Nc6
+3. Bb5 a6`}
           style={{
             width: '100%',
-            height: 250,
-            padding: 15,
-            backgroundColor: '#222',
+            height: 280,
+            backgroundColor:
+              '#222',
             color: 'white',
-            border: '1px solid #444',
-            borderRadius: 8,
-            fontFamily: 'monospace',
+            border:
+              '1px solid #444',
+            borderRadius: 10,
+            padding: 15,
             fontSize: 14,
+            fontFamily:
+              'monospace',
+            resize: 'vertical',
           }}
         />
 
         <div
           style={{
             display: 'flex',
-            gap: 10,
+            gap: 15,
             marginTop: 20,
+            flexWrap: 'wrap',
           }}
         >
           <button
-            onClick={handlePgnUpload}
+            onClick={
+              handlePgnUpload
+            }
             disabled={loading}
             style={{
-              padding: '12px 20px',
-              backgroundColor: '#00cc66',
-              border: 'none',
+              padding:
+                '12px 20px',
               borderRadius: 8,
-              fontWeight: 'bold',
+              border: 'none',
               cursor: 'pointer',
+              backgroundColor:
+                '#00cc66',
+              color: 'black',
+              fontWeight:
+                'bold',
+              fontSize: 15,
             }}
           >
             {loading
-              ? loadingText
+              ? 'Analyzing...'
               : 'Analyze Game'}
           </button>
 
@@ -266,40 +282,55 @@ export default function AnalysisMode({
               fileInputRef.current?.click()
             }
             style={{
-              padding: '12px 20px',
-              backgroundColor: '#333',
-              color: 'white',
-              border: 'none',
+              padding:
+                '12px 20px',
               borderRadius: 8,
+              border: 'none',
               cursor: 'pointer',
+              backgroundColor:
+                '#007bff',
+              color: 'white',
+              fontWeight:
+                'bold',
+              fontSize: 15,
             }}
           >
             Upload PGN
           </button>
 
           <input
-            ref={fileInputRef}
+            ref={
+              fileInputRef
+            }
             type='file'
             accept='.pgn,.txt'
-            style={{ display: 'none' }}
+            style={{
+              display:
+                'none',
+            }}
             onChange={(e) => {
               const file =
-                e.target.files[0];
+                e.target
+                  .files[0];
 
-              if (!file) return;
+              if (!file)
+                return;
 
               const reader =
                 new FileReader();
 
-              reader.onload = (
-                event
-              ) => {
-                setPgn(
-                  event.target.result
-                );
-              };
+              reader.onload =
+                (event) => {
+                  setPgn(
+                    event
+                      .target
+                      .result
+                  );
+                };
 
-              reader.readAsText(file);
+              reader.readAsText(
+                file
+              );
             }}
           />
         </div>
@@ -307,16 +338,16 @@ export default function AnalysisMode({
     );
   }
 
-  // =====================================
-  // LOADING
-  // =====================================
-
-  if (!uploadedGame || !analysis) {
+  if (
+    !uploadedGame ||
+    !analysis
+  ) {
     return null;
   }
 
   const move =
-    uploadedGame.moveHistory[
+    uploadedGame
+      .moveHistory[
       currentMoveIndex
     ];
 
@@ -324,10 +355,6 @@ export default function AnalysisMode({
     COACH_PERSONAS[
       selectedCoach
     ];
-
-  // =====================================
-  // ANALYSIS SCREEN
-  // =====================================
 
   return (
     <div
@@ -337,142 +364,287 @@ export default function AnalysisMode({
           '2fr 1fr',
         gap: 20,
         padding: 20,
-        backgroundColor: '#111',
+        backgroundColor:
+          '#111',
         color: 'white',
-        minHeight: '100vh',
+        minHeight:
+          '100vh',
       }}
     >
-      {/* LEFT SIDE */}
-
+      {/* LEFT PANEL */}
       <div>
         <button
           onClick={() => {
-            setGameState('upload');
-            setAnalysis(null);
-            setUploadedGame(null);
-            setCurrentMoveIndex(0);
+            setGameState(
+              'upload'
+            );
+
+            setUploadedGame(
+              null
+            );
+
+            setAnalysis(
+              null
+            );
+
+            setCurrentMoveIndex(
+              0
+            );
           }}
           style={{
             marginBottom: 20,
-            padding: '10px 16px',
+            padding:
+              '10px 16px',
+            borderRadius: 8,
+            border: 'none',
             cursor: 'pointer',
+            backgroundColor:
+              '#333',
+            color: 'white',
           }}
         >
           ← Back
         </button>
 
-        <h2>
-          Move{' '}
-          {currentMoveIndex + 1}
-        </h2>
-
+        {/* GAME INFO */}
         <div
           style={{
-            fontSize: 36,
-            fontWeight: 'bold',
-            marginTop: 10,
-          }}
-        >
-          {move.san}
-        </div>
-
-        <div
-          style={{
-            color:
-              CLASSIFICATION_COLOR[
-                move.classification
-              ],
-            fontWeight: 'bold',
-            marginTop: 10,
-            fontSize: 22,
-          }}
-        >
-          {
-            CLASSIFICATION_EMOJI[
-              move.classification
-            ]
-          }{' '}
-          {move.classification}
-        </div>
-
-        <div
-          style={{
-            marginTop: 25,
-            backgroundColor: '#222',
+            backgroundColor:
+              '#1c1c1c',
             padding: 20,
-            borderRadius: 10,
+            borderRadius: 12,
+            marginBottom: 20,
           }}
         >
-          <div>
-            <strong>
-              Played Eval:
-            </strong>{' '}
-            {move.playedEval}
-          </div>
+          <h2>
+            Game Overview
+          </h2>
 
           <div
             style={{
-              marginTop: 10,
+              display:
+                'grid',
+              gridTemplateColumns:
+                '1fr 1fr',
+              gap: 10,
+              marginTop: 15,
             }}
           >
-            <strong>
-              Best Eval:
-            </strong>{' '}
-            {move.bestEval}
-          </div>
-
-          <div
-            style={{
-              marginTop: 10,
-            }}
-          >
-            <strong>
-              Best Move:
-            </strong>{' '}
-            {move.bestMove}
-          </div>
-
-          <div
-            style={{
-              marginTop: 10,
-            }}
-          >
-            <strong>PV:</strong>{' '}
-            {move.pv}
-          </div>
-
-          {move.mate && (
-            <div
-              style={{
-                marginTop: 10,
-                color: '#ff4444',
-                fontWeight:
-                  'bold',
-              }}
-            >
-              Mate in {move.mate}
+            <div>
+              Accuracy:{' '}
+              <strong>
+                {
+                  analysis.accuracy
+                }
+                %
+              </strong>
             </div>
-          )}
+
+            <div>
+              ACPL:{' '}
+              <strong>
+                {
+                  analysis.acpl
+                }
+              </strong>
+            </div>
+
+            <div>
+              Blunders:{' '}
+              <strong>
+                {
+                  analysis
+                    .blunders
+                    .length
+                }
+              </strong>
+            </div>
+
+            <div>
+              Brilliant:{' '}
+              <strong>
+                {
+                  analysis
+                    .brilliantMoves
+                    .length
+                }
+              </strong>
+            </div>
+          </div>
+        </div>
+
+        {/* CURRENT MOVE */}
+        <div
+          style={{
+            backgroundColor:
+              '#1c1c1c',
+            padding: 20,
+            borderRadius: 12,
+            marginBottom: 20,
+          }}
+        >
+          <h2>
+            Move{' '}
+            {currentMoveIndex +
+              1}
+          </h2>
+
+          <div
+            style={{
+              fontSize: 42,
+              fontWeight:
+                'bold',
+              marginTop: 10,
+            }}
+          >
+            {move.san}
+          </div>
+
+          <div
+            style={{
+              color:
+                CLASSIFICATION_COLOR[
+                  move
+                    .classification
+                ],
+              fontWeight:
+                'bold',
+              fontSize: 24,
+              marginTop: 15,
+            }}
+          >
+            {
+              CLASSIFICATION_EMOJI[
+                move
+                  .classification
+              ]
+            }{' '}
+            {
+              move.classification
+            }
+          </div>
+
+          <div
+            style={{
+              marginTop: 20,
+              lineHeight: 2,
+            }}
+          >
+            <div>
+              <strong>
+                Eval:
+              </strong>{' '}
+              {
+                move.playedEval
+              }
+            </div>
+
+            <div>
+              <strong>
+                Best Move:
+              </strong>{' '}
+              {
+                move.bestMove
+              }
+            </div>
+
+            <div>
+              <strong>
+                PV:
+              </strong>{' '}
+              {move.pv}
+            </div>
+
+            {move.mate !==
+              null && (
+              <div>
+                <strong>
+                  Mate:
+                </strong>{' '}
+                {
+                  move.mate
+                }
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* NOTES */}
+        <div
+          style={{
+            backgroundColor:
+              '#1c1c1c',
+            padding: 20,
+            borderRadius: 12,
+            marginBottom: 20,
+          }}
+        >
+          <h3>
+            📝 Notes
+          </h3>
+
+          <textarea
+            value={
+              gameNotes[
+                currentMoveIndex
+              ] || ''
+            }
+            onChange={(e) =>
+              setGameNotes({
+                ...gameNotes,
+                [
+                  currentMoveIndex
+                ]:
+                  e.target
+                    .value,
+              })
+            }
+            placeholder='Write your thoughts...'
+            style={{
+              width: '100%',
+              height: 120,
+              marginTop: 10,
+              backgroundColor:
+                '#222',
+              color: 'white',
+              border:
+                '1px solid #444',
+              borderRadius: 10,
+              padding: 12,
+              resize: 'vertical',
+            }}
+          />
         </div>
 
         {/* NAVIGATION */}
-
         <div
           style={{
             display: 'flex',
             gap: 10,
-            marginTop: 20,
           }}
         >
           <button
             disabled={
-              currentMoveIndex === 0
+              currentMoveIndex ===
+              0
             }
             onClick={() =>
               setCurrentMoveIndex(
-                currentMoveIndex - 1
+                currentMoveIndex -
+                  1
               )
             }
+            style={{
+              padding:
+                '12px 18px',
+              borderRadius: 8,
+              border: 'none',
+              backgroundColor:
+                '#007bff',
+              color: 'white',
+              cursor:
+                'pointer',
+            }}
           >
             ⬅ Prev
           </button>
@@ -481,68 +653,57 @@ export default function AnalysisMode({
             disabled={
               currentMoveIndex ===
               uploadedGame
-                .moveHistory.length -
+                .moveHistory
+                .length -
                 1
             }
             onClick={() =>
               setCurrentMoveIndex(
-                currentMoveIndex + 1
+                currentMoveIndex +
+                  1
               )
             }
+            style={{
+              padding:
+                '12px 18px',
+              borderRadius: 8,
+              border: 'none',
+              backgroundColor:
+                '#007bff',
+              color: 'white',
+              cursor:
+                'pointer',
+            }}
           >
             Next ➜
           </button>
         </div>
       </div>
 
-      {/* RIGHT SIDE */}
-
+      {/* RIGHT PANEL */}
       <div>
-        {/* ACCURACY */}
-
-        <div
-          style={{
-            backgroundColor: '#222',
-            padding: 20,
-            borderRadius: 10,
-            marginBottom: 20,
-          }}
-        >
-          <h2>Accuracy</h2>
-
-          <h1
-            style={{
-              fontSize: 50,
-            }}
-          >
-            {analysis.accuracy}%
-          </h1>
-
-          <p>
-            ACPL:{' '}
-            {analysis.acpl}
-          </p>
-        </div>
-
         {/* COACH */}
-
         <div
           style={{
-            backgroundColor: '#222',
+            backgroundColor:
+              '#1c1c1c',
             padding: 20,
-            borderRadius: 10,
+            borderRadius: 12,
             marginBottom: 20,
           }}
         >
-          <h2>Coach</h2>
+          <h2>
+            Coach Mode
+          </h2>
 
           <div
             style={{
-              display: 'flex',
+              display:
+                'flex',
               flexDirection:
                 'column',
               gap: 10,
-              marginTop: 20,
+              marginTop: 15,
             }}
           >
             {Object.entries(
@@ -561,26 +722,32 @@ export default function AnalysisMode({
                   }
                   style={{
                     padding:
-                      '10px 12px',
+                      '12px',
+                    borderRadius: 8,
+                    border:
+                      'none',
+                    cursor:
+                      'pointer',
                     backgroundColor:
                       selectedCoach ===
                       key
-                        ? '#00B0FF'
+                        ? '#00bfff'
                         : '#333',
                     color:
                       selectedCoach ===
                       key
                         ? 'black'
                         : 'white',
-                    border: 'none',
-                    borderRadius: 8,
-                    cursor: 'pointer',
                     fontWeight:
                       'bold',
                   }}
                 >
-                  {value.emoji}{' '}
-                  {value.name}
+                  {
+                    value.emoji
+                  }{' '}
+                  {
+                    value.name
+                  }
                 </button>
               )
             )}
@@ -589,8 +756,8 @@ export default function AnalysisMode({
           <div
             style={{
               marginTop: 20,
-              lineHeight: 1.6,
-              color: '#ccc',
+              lineHeight: 1.7,
+              color: '#ddd',
             }}
           >
             {coach.getComment(
@@ -599,32 +766,41 @@ export default function AnalysisMode({
           </div>
         </div>
 
-        {/* BRILLIANT MOVES */}
-
+        {/* BRILLIANTS */}
         <div
           style={{
-            backgroundColor: '#222',
+            backgroundColor:
+              '#1c1c1c',
             padding: 20,
-            borderRadius: 10,
+            borderRadius: 12,
+            marginBottom: 20,
           }}
         >
           <h2>
-            💎 Brilliant Moves
+            💎 Brilliant
+            Moves
           </h2>
 
-          {analysis.brilliantMoves
+          {analysis
+            .brilliantMoves
             .length === 0 && (
-            <p
+            <div
               style={{
-                color: '#888',
+                color:
+                  '#888',
+                marginTop: 10,
               }}
             >
-              No brilliant moves
-            </p>
+              No brilliant
+              moves found
+            </div>
           )}
 
           {analysis.brilliantMoves.map(
-            (move, index) => (
+            (
+              move,
+              index
+            ) => (
               <div
                 key={index}
                 style={{
@@ -632,42 +808,72 @@ export default function AnalysisMode({
                 }}
               >
                 💎 Move{' '}
-                {move.turn}:{' '}
-                {move.move}
+                {
+                  move.turn
+                }
+                :{' '}
+                {
+                  move.move
+                }
               </div>
             )
           )}
+        </div>
 
-          <h2
-            style={{
-              marginTop: 30,
-            }}
-          >
+        {/* BLUNDERS */}
+        <div
+          style={{
+            backgroundColor:
+              '#1c1c1c',
+            padding: 20,
+            borderRadius: 12,
+          }}
+        >
+          <h2>
             💥 Blunders
           </h2>
 
-          {analysis.blunders.length ===
-            0 && (
-            <p
+          {analysis
+            .blunders
+            .length === 0 && (
+            <div
               style={{
-                color: '#888',
+                color:
+                  '#888',
+                marginTop: 10,
               }}
             >
               No blunders
-            </p>
+            </div>
           )}
 
           {analysis.blunders.map(
-            (move, index) => (
+            (
+              move,
+              index
+            ) => (
               <div
                 key={index}
                 style={{
                   marginTop: 10,
+                  cursor:
+                    'pointer',
                 }}
+                onClick={() =>
+                  setCurrentMoveIndex(
+                    move.turn -
+                      1
+                  )
+                }
               >
                 💥 Move{' '}
-                {move.turn}:{' '}
-                {move.move}
+                {
+                  move.turn
+                }
+                :{' '}
+                {
+                  move.move
+                }
               </div>
             )
           )}
@@ -675,4 +881,4 @@ export default function AnalysisMode({
       </div>
     </div>
   );
-            }
+              }
