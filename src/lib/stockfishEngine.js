@@ -1,16 +1,6 @@
+// src/lib/stockfishEngine.js
+
 let engine = null;
-
-function normalizeEval(score, mate) {
-  if (mate !== null) {
-    if (mate > 0) {
-      return 10000 - mate;
-    }
-
-    return -10000 - mate;
-  }
-
-  return score;
-}
 
 export async function initEngine() {
   return new Promise((resolve) => {
@@ -19,7 +9,9 @@ export async function initEngine() {
       return;
     }
 
-    engine = new Worker('/stockfish.js');
+    engine = new Worker(
+      '/stockfish-18-lite.js'
+    );
 
     engine.postMessage('uci');
 
@@ -39,75 +31,125 @@ export async function evaluatePosition(
 ) {
   return new Promise((resolve) => {
     let latestEval = 0;
-    let mate = null;
-    let bestMove = '';
+
+    let bestMove = null;
+
     let pv = '';
+
+    let mate = null;
 
     engine.onmessage = (e) => {
       const line = e.data;
 
-      // Centipawn score
-      if (line.includes('score cp')) {
+      // CENTIPAWN SCORE
+      if (
+        line.includes(
+          'score cp'
+        )
+      ) {
         const match =
-          line.match(/score cp (-?\d+)/);
-
-        if (match) {
-          latestEval = parseInt(match[1]);
-          mate = null;
-        }
-      }
-
-      // Mate score
-      if (line.includes('score mate')) {
-        const mateMatch =
-          line.match(/score mate (-?\d+)/);
-
-        if (mateMatch) {
-          mate = parseInt(mateMatch[1]);
-        }
-      }
-
-      // Principal variation
-      if (line.includes(' pv ')) {
-        const pvMatch =
-          line.match(/ pv (.+)/);
-
-        if (pvMatch) {
-          pv = pvMatch[1];
-        }
-      }
-
-      // Final best move
-      if (line.includes('bestmove')) {
-        const parts = line.split(' ');
-        bestMove = parts[1];
-
-        const sideToMove =
-          fen.split(' ')[1];
-
-        let finalEval =
-          normalizeEval(
-            latestEval,
-            mate
+          line.match(
+            /score cp (-?\d+)/
           );
 
-        // Make positive always mean White advantage
-        if (sideToMove === 'b') {
-          finalEval = -finalEval;
+        if (match) {
+          latestEval =
+            parseInt(
+              match[1]
+            );
+        }
+      }
+
+      // MATE SCORE
+      if (
+        line.includes(
+          'score mate'
+        )
+      ) {
+        const mateMatch =
+          line.match(
+            /score mate (-?\d+)/
+          );
+
+        if (mateMatch) {
+          mate =
+            parseInt(
+              mateMatch[1]
+            );
+
+          // HUGE VALUE FOR MATES
+          latestEval =
+            mate > 0
+              ? 10000 -
+                mate
+              : -10000 -
+                mate;
+        }
+      }
+
+      // PV
+      if (
+        line.includes(
+          ' pv '
+        )
+      ) {
+        const pvMatch =
+          line.match(
+            / pv (.+)/
+          );
+
+        if (pvMatch) {
+          pv =
+            pvMatch[1];
+        }
+      }
+
+      // BESTMOVE
+      if (
+        line.includes(
+          'bestmove'
+        )
+      ) {
+        const parts =
+          line.split(
+            ' '
+          );
+
+        bestMove =
+          parts[1];
+
+        // NORMALIZE EVAL
+        // POSITIVE = WHITE BETTER
+        // NEGATIVE = BLACK BETTER
+
+        const sideToMove =
+          fen.includes(
+            ' w '
+          )
+            ? 'white'
+            : 'black';
+
+        let normalizedEval =
+          latestEval;
+
+        if (
+          sideToMove ===
+          'black'
+        ) {
+          normalizedEval =
+            -normalizedEval;
         }
 
         resolve({
-          eval: finalEval,
-          rawEval: latestEval,
-          mate,
+          eval:
+            normalizedEval,
           bestMove,
           pv,
+          mate,
           depth,
         });
       }
     };
-
-    engine.postMessage('ucinewgame');
 
     engine.postMessage(
       `position fen ${fen}`
