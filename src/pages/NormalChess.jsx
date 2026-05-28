@@ -280,23 +280,44 @@ export default function NormalChess({ timerMode, onBack }) {
       if (!finalMove || gameRef.current.fen() !== fen) return;
 
       if (engineMoves.length > 0) {
-        const r = Math.random();
-        if (bot.id === 'astra') {
-          if (r < 0.35) finalMove = allMoves[Math.floor(Math.random() * allMoves.length)];
-          else finalMove = r < 0.70 ? safeMove(12) : safeMove(Math.floor(Math.random() * 5));
-        } else if (bot.id === 'orion') {
-          finalMove = r < 0.15 ? safeMove(15) : r < 0.40 ? safeMove(6) : safeMove(Math.floor(Math.random() * 3));
-        } else if (bot.id === 'titanx') {
-          finalMove = r < 0.08 ? safeMove(10) : r < 0.25 ? safeMove(4) : engineMoves[0];
-        } else if (bot.id === 'vortex') {
-          finalMove = r < 0.20 ? safeMove(4) : engineMoves[0];
-        } else if (bot.id === 'zenith') {
-          finalMove = r < 0.85 ? safeMove(1) : safeMove(4);
-        } else if (bot.id === 'phoenix') {
-          finalMove = r < 0.92 ? engineMoves[0] : safeMove(1);
-        } else {
-          finalMove = engineMoves[0];
-        }
+  const r = Math.random();
+  const totalMoves = allMoves.length;
+
+  if (bot.id === 'astra') {
+    // Beginner: 60% fully random, 30% bad engine move, 10% decent
+    if (r < 0.60) finalMove = allMoves[Math.floor(Math.random() * totalMoves)];
+    else if (r < 0.90) finalMove = safeMove(Math.floor(engineMoves.length * 0.7 + Math.random() * engineMoves.length * 0.3));
+    else finalMove = safeMove(Math.floor(Math.random() * Math.min(5, engineMoves.length)));
+
+  } else if (bot.id === 'orion') {
+    // Easy: 25% random, 40% bottom-half engine move, 35% mid-range
+    if (r < 0.25) finalMove = allMoves[Math.floor(Math.random() * totalMoves)];
+    else if (r < 0.65) finalMove = safeMove(Math.floor(engineMoves.length * 0.5 + Math.random() * engineMoves.length * 0.5));
+    else finalMove = safeMove(Math.floor(Math.random() * Math.min(6, engineMoves.length)));
+
+  } else if (bot.id === 'titanx') {
+    // Intermediate: 8% random, 25% top-5, 67% top-2
+    if (r < 0.08) finalMove = allMoves[Math.floor(Math.random() * totalMoves)];
+    else if (r < 0.33) finalMove = safeMove(Math.floor(Math.random() * Math.min(5, engineMoves.length)));
+    else finalMove = safeMove(r < 0.75 ? 1 : 0);
+
+  } else if (bot.id === 'vortex') {
+    // Advanced: 5% top-4, 95% top-2
+    finalMove = r < 0.05 ? safeMove(Math.floor(Math.random() * Math.min(4, engineMoves.length)))
+                          : safeMove(r < 0.60 ? 1 : 0);
+
+  } else if (bot.id === 'zenith') {
+    // Master: almost always best, rare 2nd
+    finalMove = r < 0.90 ? engineMoves[0] : safeMove(1);
+
+  } else if (bot.id === 'phoenix') {
+    // Max: 97% best move
+    finalMove = r < 0.97 ? engineMoves[0] : safeMove(1);
+
+  } else {
+    // Beast: always best move, no variance
+    finalMove = engineMoves[0];
+  }
       }
 
       const nextG = new Chess(fen);
